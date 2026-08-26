@@ -1,0 +1,8 @@
+{
+  "name": "Nexora network",
+  "description": "Comprehensive ISP and MikroTik Network Management Dashboard",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

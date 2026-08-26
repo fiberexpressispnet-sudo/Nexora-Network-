@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply overflow-x-hidden bg-[#ecf0f5] text-slate-800 font-sans antialiased;
+  }
+}
+
+/* Custom Scrollbar for professional enterprise UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #080e1e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* High contrast inputs and controls */
+input, select, textarea {
+  color-scheme: dark;
+}
+
