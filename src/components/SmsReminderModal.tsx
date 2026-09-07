@@ -76,10 +76,10 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  try {
  await navigator.clipboard.writeText(messageText);
  setCopied(true);
- showToast('SMS টেক্সট কপি করা হয়েছে!', 'success');
+ showToast('SMS text copied to clipboard!', 'success');
  setTimeout(() => setCopied(false), 2000);
  } catch {
- showToast('কপি করা সম্ভব হয়নি', 'error');
+ showToast('Could not copy text', 'error');
  }
  };
 
@@ -93,7 +93,7 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  if (onSmsSent) {
  onSmsSent(client, messageText, 'SMS');
  }
- showToast(`📱 ${client.name}-কে SMS পাঠানোর অ্যাপ ওপেন হয়েছে!`, 'success');
+ showToast(`📱 SMS app opened for ${client.name}!`, 'success');
  onClose();
  };
 
@@ -107,7 +107,7 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  if (onSmsSent) {
  onSmsSent(client, messageText, 'WhatsApp');
  }
- showToast(`💬 ${client.name}-কে WhatsApp রিমাইন্ডার পাঠানো হচ্ছে!`, 'success');
+ showToast(`💬 Sending WhatsApp reminder to ${client.name}!`, 'success');
  onClose();
  };
 
@@ -115,14 +115,14 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  if (onSmsSent) {
  onSmsSent(client, messageText, 'Manual');
  }
- showToast(`✅ ${client.name}-এর জন্য SMS রিমাইন্ডার লগ সংরক্ষণ করা হয়েছে`, 'success');
+ showToast(`✅ SMS reminder log saved for ${client.name}`, 'success');
  onClose();
  };
 
  return (
  <Modal
  isOpen={isOpen}
- title="Send SMS Subscription Reminder (এসএমএস রিমাইন্ডার)"
+ title="Send SMS Subscription Reminder"
  onClose={onClose}
  maxWidth="max-w-xl"
  >
@@ -173,7 +173,7 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  {/* Template Selector */}
  <div className="space-y-1.5">
  <label className="block text-[11px] font-bold text-slate-700 ">
- Select Template (টেমপ্লেট নির্বাচন করুন):
+ Select Template:
  </label>
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
  {SMS_TEMPLATES.map((tpl) => (
@@ -205,11 +205,11 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  <div className="space-y-1.5">
  <div className="flex justify-between items-center">
  <label className="block text-[11px] font-bold text-slate-700 ">
- SMS Content (মেসেজ বডি):
+ SMS Content (Message Body):
  </label>
  <div className="text-[10px] font-mono text-slate-800 flex items-center gap-2">
  <span>
- {charCount} chars ({isUnicode ? 'বাংলা / Unicode' : 'Standard ASCII'})
+ {charCount} chars ({isUnicode ? 'Unicode' : 'Standard ASCII'})
  </span>
  <span className="bg-slate-200 px-1.5 py-0.2 rounded font-bold">
  {segmentCount} SMS
@@ -221,7 +221,7 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  rows={4}
  value={messageText}
  onChange={(e) => setMessageText(e.target.value)}
- placeholder="রিমাইন্ডার মেসেজ লিখুন..."
+ placeholder="Type reminder message..."
  className="w-full p-3 rounded border border-slate-300 bg-white text-slate-900 text-xs focus:outline-none focus:border-[#3c8dbc] font-sans leading-relaxed resize-y"
  />
  </div>
@@ -236,7 +236,7 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  className="py-2.5 px-3 bg-gradient-to-r from-sky-600 to-cyan-600 hover:brightness-110 text-white font-bold rounded flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-98"
  >
  <Smartphone className="w-4 h-4" />
- <span>Send SMS (সরাসরি মেসেজ পাঠান)</span>
+ <span>Send SMS</span>
  </button>
 
  {/* WhatsApp */}
@@ -246,7 +246,7 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-98"
  >
  <Send className="w-4 h-4" />
- <span>Send WhatsApp (হোয়াটসঅ্যাপ)</span>
+ <span>Send WhatsApp</span>
  </button>
  </div>
 
@@ -257,7 +257,7 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  className="py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 "
  >
  {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
- <span>{copied ? 'কপি হয়েছে' : 'Copy Text (কপি)'}</span>
+ <span>{copied ? 'Copied!' : 'Copy Text'}</span>
  </button>
 
  <div className="flex items-center gap-2">

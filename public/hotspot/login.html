@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Hotspot WiFi Login & Recharge</title>
+  <meta name="theme-color" content="#0284c7">
+  <style>
+    :root {
+      --primary: #0284c7;
+      --primary-dark: #0369a1;
+      --accent: #059669;
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --bkash: #e2136e;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+    body {
+      background: radial-gradient(circle at top, #1e293b 0%, #0f172a 100%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 16px 12px;
+      font-size: 14px;
+    }
+    .container {
+      width: 100%;
+      max-width: 1100px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+      margin-top: 10px;
+      transition: max-width 0.3s ease;
+    }
+    .container.login-mode {
+      max-width: 440px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      padding: 24px 20px;
+      text-align: center;
+      position: relative;
+    }
+    .header .wifi-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(4px);
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .header h1 {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 4px;
+    }
+    .header p {
+      font-size: 13px;
+      opacity: 0.9;
+    }
+    .nav-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.6);
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 14px;
+      text-align: center;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .tab-btn.active {
+      color: #38bdf8;
+      border-bottom-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.05);
+    }
+    .content {
+      padding: 20px;
+    }
+    .tab-pane {
+      display: none;
+    }
+    .tab-pane.active {
+      display: block;
+    }
+    .alert-error {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid #ef4444;
+      color: #fca5a5;
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .form-control {
+      width: 100%;
+      padding: 12px 14px;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: #ffffff;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    .form-control:focus {
+      outline: none;
+      border-color: #38bdf8;
+    }
+    .btn-login {
+      width: 100%;
+      padding: 13px;
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      color: #ffffff;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 6px -1px rgba(2, 132, 199, 0.3);
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-login:hover {
+      opacity: 0.95;
+      transform: translateY(-1px);
+    }
+    .btn-trial {
+      display: block;
+      width: 100%;
+      text-align: center;
+      padding: 10px;
+      margin-top: 10px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid #10b981;
+      color: #6ee7b7;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .btn-trial:hover {
+      background: rgba(16, 185, 129, 0.25);
+    }
+    .mode-switch {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #0f172a;
+      padding: 8px 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 12px;
+    }
+    .mode-switch .mode-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: #38bdf8;
+      padding: 4px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    /* EXACT APP PACKAGE CARDS DESIGN */
+    .packages-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+    @media (min-width: 640px) {
+      .packages-grid {
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      }
+    }
+    .custom-pkg-card {
+      border-radius: 26px;
+      padding: 24px 20px;
+      color: #ffffff;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      min-height: 440px;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      cursor: pointer;
+      border: 3px solid transparent;
+    }
+    .custom-pkg-card:hover {
+      transform: translateY(-4px) scale(1.02);
+      box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.6);
+    }
+    .custom-pkg-card.selected-card {
+      border-color: #ffffff;
+      box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.45), 0 20px 35px -5px rgba(0, 0, 0, 0.7);
+    }
+    .pkg-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      margin-bottom: 10px;
+    }
+    .pkg-badge-pill {
+      background: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(8px);
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 9px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .pkg-status-pill {
+      background: rgba(255, 255, 255, 0.22);
+      padding: 3px 9px;
+      border-radius: 9999px;
+      font-size: 9px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .pkg-speed-box {
+      padding: 6px 0;
+    }
+    .pkg-speed-num {
+      font-size: 48px;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -1px;
+      text-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    }
+    .pkg-speed-unit {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      opacity: 0.95;
+      margin-top: 4px;
+    }
+    .pkg-title-box {
+      margin: 8px 0;
+    }
+    .pkg-title {
+      font-size: 14px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #ffffff;
+      line-height: 1.3;
+    }
+    .pkg-validity {
+      font-size: 10px;
+      font-weight: 700;
+      opacity: 0.95;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 4px;
+    }
+    .pkg-features-box {
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 18px;
+      padding: 12px 10px;
+      margin: 12px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      text-align: center;
+    }
+    .pkg-feat-item {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .feat-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #ffffff;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .pkg-device-pill {
+      background: rgba(255, 255, 255, 0.18);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 9999px;
+      padding: 4px 12px;
+      font-size: 9px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: inline-block;
+      margin: 0 auto;
+    }
+    .pkg-price-box {
+      margin: 8px 0;
+    }
+    .pkg-main-price {
+      font-size: 32px;
+      font-weight: 900;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+      line-height: 1.1;
+    }
+    .pkg-renew-price {
+      font-size: 9px;
+      font-weight: 800;
+      text-transform: uppercase;
+      opacity: 0.85;
+      letter-spacing: 1.5px;
+      margin-top: 2px;
+    }
+    .btn-buy-card {
+      background: #ffffff;
+      color: #0f172a;
+      border: none;
+      border-radius: 14px;
+      padding: 11px 14px;
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+      margin-top: 8px;
+      width: 100%;
+    }
+    .btn-buy-card:hover {
+      transform: scale(1.02);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    }
+    .selected-card .btn-buy-card {
+      background: #0f172a;
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+    }
+
+    /* Checkout Drawer */
+    .checkout-wrapper {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 20px;
+      padding: 20px;
+      margin-top: 20px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .selected-banner {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid #38bdf8;
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .bkash-badge {
+      background: var(--bkash);
+      color: #ffffff;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .pay-instructions {
+      background: #1e293b;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      font-size: 12px;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+    .pay-instructions strong {
+      color: #fb7185;
+    }
+    .copy-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #0f172a;
+      padding: 10px 14px;
+      border-radius: 10px;
+      margin: 10px 0;
+      font-family: monospace;
+      font-size: 15px;
+      color: #facc15;
+      font-weight: 700;
+      border: 1px dashed #475569;
+    }
+    .btn-copy {
+      background: #38bdf8;
+      color: #0f172a;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .footer-info {
+      padding: 14px 20px;
+      background: #0f172a;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .hotline-link {
+      color: #38bdf8;
+      text-decoration: none;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container" id="mainContainer">
+    <div class="header">
+      <div class="wifi-badge">
+        <span>⚡</span>
+        <span>High-Speed WiFi Hotspot</span>
+      </div>
+      <h1 id="ispTitle">Nexora Network</h1>
+      <p>নির্বিঘ্ন ও দ্রুতগতির ইন্টারনেট সেবা</p>
+    </div>
+
+    <div class="nav-tabs">
+      <button type="button" class="tab-btn" id="tabLoginBtn" onclick="switchTab('login')">
+        <span>🔐</span>
+        <span>লগইন করুন (WiFi Login)</span>
+      </button>
+      <button type="button" class="tab-btn active" id="tabBuyBtn" onclick="switchTab('buy')">
+        <span>⚡</span>
+        <span>প্যাকেজ ক্রয় (Buy Package)</span>
+      </button>
+    </div>
+
+    <div class="content">
+
+      <!-- $(if error) -->
+      <div class="alert-error" id="errorBlock">
+        <span>⚠️</span>
+        <div>$(error)</div>
+      </div>
+      <!-- $(endif) -->
+
+      <!-- TAB 1: LOGIN -->
+      <div class="tab-pane" id="paneLogin">
+        <form name="login" action="$(link-login-only)" method="post" onsubmit="return validateLogin()">
+          <input type="hidden" name="dst" value="$(link-orig)" />
+          <input type="hidden" name="popup" value="true" />
+
+          <div class="mode-switch">
+            <span id="modeLabel">ইউজারনেম ও পাসওয়ার্ড মোড</span>
+            <button type="button" class="mode-btn" id="toggleModeBtn" onclick="toggleVoucherMode()">
+              ভাউচার পিন দিন
+            </button>
+          </div>
+
+          <div class="form-group" id="userGroup">
+            <label for="username">ইউজারনেম / Username</label>
+            <input type="text" id="username" name="username" class="form-control" placeholder="018XXXXXXXX" value="$(username)" required autofocus>
+          </div>
+
+          <div class="form-group" id="passGroup">
+            <label for="password">পাসওয়ার্ড / Password</label>
+            <input type="password" id="password" name="password" class="form-control" placeholder="••••••••" required>
+          </div>
+
+          <button type="submit" class="btn-login">
+            <span>কানেক্ট করুন (Connect WiFi)</span>
+            <span>→</span>
+          </button>
+
+          <!-- $(if trial == 'yes') -->
+          <a href="$(link-login-only)?dst=$(link-orig-esc)&amp;username=T-$(mac-esc)" class="btn-trial">
+            🎁 বিনামূল্যে ট্রায়াল ব্যবহার করুন (Free Trial)
+          </a>
+          <!-- $(endif) -->
+        </form>
+
+        <div style="margin-top: 16px; text-align: center;">
+          <small style="color: var(--text-muted); font-size: 12px;">
+            কোনো কোড নেই? <a href="javascript:void(0)" onclick="switchTab('buy')" style="color: #38bdf8; font-weight: 700; text-decoration: underline;">এখান থেকে প্যাকেজ কিনুন</a>
+          </small>
+        </div>
+      </div>
+
+      <!-- TAB 2: BUY PACKAGE (EXACT APP CARDS DESIGN) -->
+      <div class="tab-pane active" id="paneBuy">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 8px;">
+          <div>
+            <h2 style="font-size: 16px; font-weight: 800; color: #ffffff;">হটস্পট ইন্টারনেট প্যাকেজসমূহ</h2>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+              পছন্দের প্যাকেজটি ক্লিক করে বিকাশ বা নগদ দিয়ে সরাসরি রিচার্জ করুন:
+            </p>
+          </div>
+          <span style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 9999px;">
+            স্বয়ংক্রিয় এক্টিভেশন
+          </span>
+        </div>
+
+        <div class="packages-grid" id="packagesList">
+          <!-- Populated dynamically with exact App Card design -->
+        </div>
+
+        <div id="checkoutBox" class="checkout-wrapper" style="display: none;">
+          <div class="selected-banner">
+            <div>
+              <div style="font-size: 10px; text-transform: uppercase; color: #7dd3fc; font-weight: 800; letter-spacing: 1px;">
+                নির্বাচিত প্যাকেজ
+              </div>
+              <div id="selectedPlanTitle" style="font-size: 16px; font-weight: 900; color: #ffffff;">
+                DFNHOB1-25 Mbps
+              </div>
+              <div id="selectedPlanMeta" style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                ⚡ 25 Mbps • 📅 30 Days Unlimited Access
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <div id="selectedPlanPrice" style="font-size: 26px; font-weight: 900; color: #38bdf8;">
+                ৳500
+              </div>
+              <button type="button" onclick="scrollToPackages()" style="background: transparent; border: none; color: #f43f5e; font-size: 10px; font-weight: 700; cursor: pointer; text-decoration: underline;">
+                প্যাকেজ পরিবর্তন করুন
+              </button>
+            </div>
+          </div>
+
+          <div class="pay-instructions">
+            <span class="bkash-badge">bKash / Nagad Personal Send Money</span>
+            <div style="margin-top: 8px;">
+              ১. আপনার বিকাশ বা নগদ অ্যাপ ওপেন করে <strong>"Send Money"</strong> অপশনে যান।<br>
+              ২. নিচের নম্বরে নির্বাচিত প্যাকেজের সমপরিমাণ টাকা পাঠান:
+            </div>
+            <div class="copy-box">
+              <span id="bkashNumDisplay">01817681233</span>
+              <button type="button" class="btn-copy" onclick="copyNumber()">নম্বর কপি করুন</button>
+            </div>
+            <div>
+              ৩. টাকা পাঠানো সফল হলে ফিরতি SMS-এ পাওয়া <strong>Transaction ID (TrxID)</strong> এবং আপনার মোবাইল নম্বর নিচে দিয়ে সাবমিট করুন।
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="clientPhone" style="display: flex; justify-content: space-between;">
+              <span>আপনার মোবাইল নম্বর (যেখানে ইন্টারনেট সক্রিয় হবে)</span>
+              <span style="color: #38bdf8; font-weight: 700;">*বাধ্যতামূলক</span>
+            </label>
+            <input type="tel" id="clientPhone" class="form-control" placeholder="018XXXXXXXX" required oninput="onClientPhoneChange(this.value)">
+          </div>
+
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label for="clientPassword" style="margin-bottom: 0;">লগইন পাসওয়ার্ড (Password)</label>
+              <span style="font-size: 11px; color: #38bdf8; background: rgba(56, 189, 248, 0.15); padding: 2px 8px; border-radius: 6px; font-weight: 700;">
+                ডিফল্ট দেওয়া আছে • চাইলে পরিবর্তন করুন
+              </span>
+            </div>
+            <div style="position: relative;">
+              <input type="text" id="clientPassword" class="form-control" value="123456" placeholder="পাসওয়ার্ড লিখুন" required style="padding-right: 86px; font-weight: 700; letter-spacing: 1px;">
+              <button type="button" onclick="generateRandomPass()" style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: #334155; border: none; color: #7dd3fc; padding: 4px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; cursor: pointer;">
+                র‍্যান্ডম পিন ⟳
+              </button>
+            </div>
+            <small style="display: block; margin-top: 4px; font-size: 11px; color: var(--text-muted);">
+              💡 ডিফল্ট পাসওয়ার্ড <strong>123456</strong> দেওয়া আছে। আপনি চাইলে কেটে দিয়ে আপনার পছন্দমতো পাসওয়ার্ড দিতে পারেন।
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label for="trxId" style="display: flex; justify-content: space-between;">
+              <span>bKash / Nagad Transaction ID (TrxID)</span>
+              <span style="color: #fb7185; font-weight: 700;">*Send Money SMS থেকে</span>
+            </label>
+            <input type="text" id="trxId" class="form-control" placeholder="যেমন: BJK7X9Q2P4" required style="text-transform: uppercase; font-family: monospace; font-size: 15px; letter-spacing: 1px;">
+          </div>
+
+          <button type="button" class="btn-login" onclick="submitOrder()">
+            <span>প্যাকেজ একটিভ করুন (Activate Package)</span>
+            <span>⚡</span>
+          </button>
+        </div>
+
+        <div id="orderSuccessBox" style="display: none; background: #064e3b; border: 1px solid #10b981; padding: 22px 18px; border-radius: 20px; text-align: center; margin-top: 20px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);">
+          <div style="width: 50px; height: 50px; background: rgba(16, 185, 129, 0.25); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 26px;">
+            🎉
+          </div>
+          <h3 style="color: #a7f3d0; font-size: 18px; margin-bottom: 8px; font-weight: 900;">
+            অভিনন্দন! আপনার প্যাকেজটি সফলভাবে ক্রয় করা হয়েছে
+          </h3>
+          <p style="font-size: 14px; color: #f1f5f9; line-height: 1.6; margin-bottom: 14px; background: rgba(0, 0, 0, 0.28); padding: 14px; border-radius: 14px; border: 1px solid rgba(16, 185, 129, 0.35);">
+            ⌛ <strong>আপনি সর্বোচ্চ তিন মিনিট পরে</strong> আপনার দেওয়া <strong>মোবাইল নম্বর</strong> এবং <strong>পাসওয়ার্ড</strong> দিয়ে লগইন করবেন, তখন আপনার ইন্টারনেট চালু হয়ে যাবে।
+          </p>
+
+          <!-- 3-Minute Countdown Timer -->
+          <div style="background: rgba(15, 23, 42, 0.7); padding: 8px 16px; border-radius: 12px; margin-bottom: 14px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #334155;">
+            <span style="font-size: 12px; color: #94a3b8;">ইন্টারনেট চালু হতে সময় বাকি:</span>
+            <span id="countdownTimer" style="font-size: 17px; font-weight: 900; color: #38bdf8; font-family: monospace;">03:00</span>
+          </div>
+
+          <!-- Credentials Summary Box -->
+          <div style="background: #0f172a; border: 1px solid #334155; border-radius: 14px; padding: 14px; text-align: left; margin-bottom: 16px;">
+            <div style="font-size: 11px; text-transform: uppercase; color: #7dd3fc; font-weight: 800; letter-spacing: 1px; margin-bottom: 10px; border-bottom: 1px solid #1e293b; padding-bottom: 5px;">
+              📋 আপনার লগইন তথ্য (স্ক্রিনশট বা নোট রাখুন)
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+              <span style="color: #94a3b8;">ইউজারনেম (মোবাইল নম্বর):</span>
+              <strong id="successPhone" style="color: #ffffff; font-family: monospace; font-size: 14px;">-</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+              <span style="color: #94a3b8;">পাসওয়ার্ড:</span>
+              <strong id="successPass" style="color: #facc15; font-family: monospace; font-size: 14px;">-</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+              <span style="color: #94a3b8;">প্যাকেজ:</span>
+              <strong id="successPackage" style="color: #38bdf8;">-</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px;">
+              <span style="color: #94a3b8;">TrxID:</span>
+              <strong id="successTrx" style="color: #34d399; font-family: monospace;">-</strong>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <button type="button" onclick="goToLoginWithCredentials()" style="background: #38bdf8; color: #0f172a; padding: 11px 20px; border-radius: 12px; border: none; font-weight: 900; font-size: 13px; cursor: pointer; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);">
+              🔐 লগইন পেজে যান ও কানেক্ট করুন →
+            </button>
+            <a href="tel:01817681233" style="display: inline-block; background: #059669; color: white; padding: 11px 18px; border-radius: 12px; text-decoration: none; font-weight: 800; font-size: 13px;">
+              📞 হেল্পলাইন (01817681233)
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="footer-info">
+      <div>IP: $(ip) | MAC: $(mac)</div>
+      <div>সার্ভার: $(identity) • সেবা সহায়তা: <a href="tel:01817681233" class="hotline-link">01817681233</a></div>
+      <div style="margin-top: 4px; opacity: 0.7;">© 2026 Nexora Network. All Rights Reserved.</div>
+    </div>
+  </div>
+
+  <script>
+    var packages = [
+      { id: 1, name: "DFNHOB1-25 Mbps (Monthly Pac)", speed: "25 Mbps", validity: "30 Days", price: "500", renewal: "500", deviceType: "Mobile", status: "Active" },
+      { id: 2, name: "DFNHOB2-20 Mbps (Monthly Pac)", speed: "20 Mbps", validity: "30 Days", price: "800", renewal: "750", deviceType: "Router", status: "Active" },
+      { id: 3, name: "DFNHOB3-30 Mbps (Monthly Pac)", speed: "30 Mbps", validity: "30 Days", price: "1000", renewal: "950", deviceType: "Router", status: "Active" },
+      { id: 4, name: "DFNHOB4-50 Mbps (Monthly Pac)", speed: "50 Mbps", validity: "30 Days", price: "1500", renewal: "1400", deviceType: "Router", status: "Active" },
+      { id: 5, name: "DFNHOB5-100 Mbps (Monthly Pac)", speed: "100 Mbps", validity: "30 Days", price: "2500", renewal: "2400", deviceType: "Router", status: "Active" },
+      { id: 6, name: "1-Day Ultra Hotspot", speed: "15 Mbps", validity: "1 Day", price: "30", renewal: "30", deviceType: "Mobile", status: "Active" },
+      { id: 7, name: "7-Day Power Hotspot", speed: "20 Mbps", validity: "7 Days", price: "100", renewal: "100", deviceType: "Mobile", status: "Active" }
+    ];
+
+    var selectedPackage = null;
+    var isVoucherOnly = false;
+
+    var colorGradients = [
+      'linear-gradient(135deg, #9333ea, #4f46e5, #5b21b6)',
+      'linear-gradient(135deg, #2563eb, #1d4ed8, #3730a3)',
+      'linear-gradient(135deg, #06b6d4, #0d9488, #0369a1)',
+      'linear-gradient(135deg, #10b981, #0d9488, #15803d)',
+      'linear-gradient(135deg, #ec4899, #f43f5e, #7e22ce)',
+      'linear-gradient(135deg, #f97316, #d97706, #dc2626)',
+      'linear-gradient(135deg, #dc2626, #e11d48, #991b1b)',
+    ];
+
+    function renderPackages() {
+      var container = document.getElementById('packagesList');
+      if (!container) return;
+      container.innerHTML = '';
+
+      packages.forEach(function(pkg, idx) {
+        var card = document.createElement('div');
+        var bg = colorGradients[idx % colorGradients.length];
+        var isSelected = (selectedPackage && selectedPackage.name === pkg.name);
+        
+        card.className = 'custom-pkg-card' + (isSelected ? ' selected-card' : '');
+        card.style.background = bg;
+
+        var numSpeed = (pkg.speed || '').replace(/\D/g, '') || '25';
+        var isMobile = (pkg.deviceType === 'Mobile');
+        var cleanTitle = (pkg.name || '').replace(/\s*\(Monthly Pac\)\s*/i, '');
+        var validity = pkg.validity || (pkg.validityDays ? pkg.validityDays + ' Days' : '30 Days');
+        var price = pkg.price || '500';
+        var renewal = pkg.renewal || price;
+
+        card.innerHTML = 
+          '<div class="pkg-top-row">' +
+            '<div class="pkg-badge-pill">⚡ Hotspot Plan</div>' +
+            '<span class="pkg-status-pill">' + (pkg.status || 'Active').toUpperCase() + '</span>' +
+          '</div>' +
+
+          '<div class="pkg-speed-box">' +
+            '<div class="pkg-speed-num">' + numSpeed + '</div>' +
+            '<div class="pkg-speed-unit">Mbps Speed</div>' +
+          '</div>' +
+
+          '<div class="pkg-title-box">' +
+            '<div class="pkg-title">' + cleanTitle + '</div>' +
+            '<div class="pkg-validity">📅 ' + validity + ' Unlimited Access</div>' +
+          '</div>' +
+
+          '<div class="pkg-features-box">' +
+            '<div class="pkg-feat-item"><span class="feat-dot"></span> Shared Bandwidth (1:8)</div>' +
+            '<div class="pkg-feat-item"><span class="feat-dot"></span> Single Device Lock</div>' +
+            '<div class="pkg-feat-item"><span class="feat-dot"></span> Optical Fiber Powered</div>' +
+            '<div class="pkg-feat-item"><span class="feat-dot"></span> 24/7 Priority Support</div>' +
+          '</div>' +
+
+          '<div class="pkg-device-pill">' + (isMobile ? '📱 Mobile Hotspot' : '📶 Router Hotspot') + '</div>' +
+
+          '<div class="pkg-price-box">' +
+            '<div class="pkg-main-price">৳' + price + '</div>' +
+            '<div class="pkg-renew-price">Renew: ৳' + renewal + '</div>' +
+          '</div>' +
+
+          '<button type="button" class="btn-buy-card" onclick="event.stopPropagation(); selectPackage(' + idx + ');">' +
+            (isSelected ? '✓ নির্বাচিত (Selected)' : '⚡ এই প্যাকেজটি কিনুন (Buy Plan)') +
+          '</button>';
+
+        card.onclick = function() { selectPackage(idx); };
+        container.appendChild(card);
+      });
+    }
+
+    function selectPackage(idx) {
+      selectedPackage = packages[idx];
+      renderPackages();
+
+      var checkoutBox = document.getElementById('checkoutBox');
+      var successBox = document.getElementById('orderSuccessBox');
+      if (checkoutBox) {
+        checkoutBox.style.display = 'block';
+        
+        var cleanTitle = (selectedPackage.name || '').replace(/\s*\(Monthly Pac\)\s*/i, '');
+        document.getElementById('selectedPlanTitle').innerText = cleanTitle;
+        document.getElementById('selectedPlanMeta').innerText = 
+          '⚡ ' + (selectedPackage.speed || '25 Mbps') + ' • 📅 ' + (selectedPackage.validity || '30 Days') + ' Unlimited Access';
+        document.getElementById('selectedPlanPrice').innerText = '৳' + (selectedPackage.price || '500');
+
+        checkoutBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      if (successBox) {
+        successBox.style.display = 'none';
+      }
+    }
+
+    function scrollToPackages() {
+      var grid = document.getElementById('packagesList');
+      if (grid) grid.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function switchTab(tab) {
+      var container = document.getElementById('mainContainer');
+      var paneLogin = document.getElementById('paneLogin');
+      var paneBuy = document.getElementById('paneBuy');
+      var tabLoginBtn = document.getElementById('tabLoginBtn');
+      var tabBuyBtn = document.getElementById('tabBuyBtn');
+
+      paneLogin.classList.remove('active');
+      paneBuy.classList.remove('active');
+      tabLoginBtn.classList.remove('active');
+      tabBuyBtn.classList.remove('active');
+
+      if (tab === 'login') {
+        paneLogin.classList.add('active');
+        tabLoginBtn.classList.add('active');
+        if (container) container.classList.add('login-mode');
+      } else {
+        paneBuy.classList.add('active');
+        tabBuyBtn.classList.add('active');
+        if (container) container.classList.remove('login-mode');
+        renderPackages();
+        if (!selectedPackage && packages.length > 0) {
+          selectPackage(0);
+        }
+      }
+    }
+
+    function toggleVoucherMode() {
+      isVoucherOnly = !isVoucherOnly;
+      var userGroup = document.getElementById('userGroup');
+      var passGroup = document.getElementById('passGroup');
+      var modeLabel = document.getElementById('modeLabel');
+      var toggleBtn = document.getElementById('toggleModeBtn');
+      var userInput = document.getElementById('username');
+
+      if (isVoucherOnly) {
+        passGroup.style.display = 'none';
+        modeLabel.innerText = 'একক ভাউচার পিন মোড';
+        toggleBtn.innerText = 'ইউজার ও পাসওয়ার্ড দিন';
+        userInput.placeholder = 'ভাউচার পিন কোড লিখুন';
+        document.querySelector('label[for="username"]').innerText = 'ভাউচার কোড / Voucher PIN';
+      } else {
+        passGroup.style.display = 'block';
+        modeLabel.innerText = 'ইউজারনেম ও পাসওয়ার্ড মোড';
+        toggleBtn.innerText = 'ভাউচার পিন দিন';
+        userInput.placeholder = '018XXXXXXXX';
+        document.querySelector('label[for="username"]').innerText = 'ইউজারনেম / Username';
+      }
+    }
+
+    function validateLogin() {
+      var user = document.getElementById('username').value.trim();
+      var pass = document.getElementById('password').value.trim();
+      if (!user) {
+        alert('দয়া করে ইউজারনেম বা ভাউচার কোড লিখুন');
+        return false;
+      }
+      if (isVoucherOnly) {
+        document.getElementById('password').value = user;
+      } else if (!pass) {
+        alert('দয়া করে পাসওয়ার্ড লিখুন');
+        return false;
+      }
+      return true;
+    }
+
+    function copyNumber() {
+      var num = document.getElementById('bkashNumDisplay').innerText;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(num).then(function() {
+          alert('বিকাশ নম্বর কপি করা হয়েছে: ' + num);
+        }).catch(function() {
+          alert('নম্বর: ' + num);
+        });
+      } else {
+        alert('নম্বর: ' + num);
+      }
+    }
+
+    var currentOrderPhone = '';
+    var currentOrderPass = '';
+    var countdownInterval = null;
+
+    function onClientPhoneChange(val) {
+      // Optional helper
+    }
+
+    function generateRandomPass() {
+      var rand = Math.floor(100000 + Math.random() * 900000);
+      var passInput = document.getElementById('clientPassword');
+      if (passInput) {
+        passInput.value = rand;
+      }
+    }
+
+    function startCountdown(durationSeconds) {
+      if (countdownInterval) clearInterval(countdownInterval);
+      var remaining = durationSeconds;
+      var timerEl = document.getElementById('countdownTimer');
+
+      function updateDisplay() {
+        var m = Math.floor(remaining / 60);
+        var s = remaining % 60;
+        var mStr = (m < 10 ? '0' : '') + m;
+        var sStr = (s < 10 ? '0' : '') + s;
+        if (timerEl) {
+          timerEl.innerText = mStr + ':' + sStr;
+          if (remaining <= 0) {
+            timerEl.innerText = 'এখনই কানেক্ট করুন! ⚡';
+            timerEl.style.color = '#34d399';
+          }
+        }
+      }
+
+      updateDisplay();
+      countdownInterval = setInterval(function() {
+        remaining--;
+        updateDisplay();
+        if (remaining <= 0) {
+          clearInterval(countdownInterval);
+        }
+      }, 1000);
+    }
+
+    function submitOrder() {
+      var phone = document.getElementById('clientPhone').value.trim();
+      var passInput = document.getElementById('clientPassword');
+      var pass = (passInput && passInput.value.trim()) ? passInput.value.trim() : '123456';
+      var trx = document.getElementById('trxId').value.trim();
+
+      if (!phone || phone.length < 11) {
+        alert('দয়া করে আপনার ১১ ডিজিটের সঠিক মোবাইল নম্বর লিখুন');
+        document.getElementById('clientPhone').focus();
+        return;
+      }
+      if (!pass) {
+        alert('দয়া করে একটি পাসওয়ার্ড দিন অথবা ডিফল্ট 123456 ব্যবহার করুন');
+        if (passInput) passInput.focus();
+        return;
+      }
+      if (!trx || trx.length < 4) {
+        alert('দয়া করে বিকাশ/নগদের সঠিক Transaction ID (TrxID) লিখুন');
+        document.getElementById('trxId').focus();
+        return;
+      }
+
+      currentOrderPhone = phone;
+      currentOrderPass = pass;
+
+      // Populate Success Summary Box
+      document.getElementById('successPhone').innerText = phone;
+      document.getElementById('successPass').innerText = pass;
+      document.getElementById('successPackage').innerText = selectedPackage ? (selectedPackage.name + ' (' + selectedPackage.speed + ')') : 'Hotspot Plan';
+      document.getElementById('successTrx').innerText = trx.toUpperCase();
+
+      // Start 3-minute (180 seconds) countdown
+      startCountdown(180);
+
+      // Send to server in background if connected to portal server
+      try {
+        fetch('/api/hotspot/purchase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'Hotspot Client ' + phone,
+            phone: phone,
+            package: selectedPackage ? selectedPackage.name : 'Hotspot Plan',
+            speed: selectedPackage ? selectedPackage.speed : '25 Mbps',
+            total: selectedPackage ? selectedPackage.price : 500,
+            transaction: trx,
+            username: phone,
+            password: pass,
+            gateway: 'bKash/Nagad'
+          })
+        }).catch(function() {});
+      } catch (e) {}
+
+      document.getElementById('checkoutBox').style.display = 'none';
+      document.getElementById('orderSuccessBox').style.display = 'block';
+      document.getElementById('orderSuccessBox').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function goToLoginWithCredentials() {
+      switchTab('login');
+      if (isVoucherOnly) {
+        toggleVoucherMode();
+      }
+      var userField = document.getElementById('username');
+      var passField = document.getElementById('password');
+      if (userField && currentOrderPhone) {
+        userField.value = currentOrderPhone;
+      }
+      if (passField && currentOrderPass) {
+        passField.value = currentOrderPass;
+      }
+      var container = document.getElementById('mainContainer');
+      if (container) {
+        container.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+
+    window.onload = function() {
+      renderPackages();
+      var errBlock = document.getElementById('errorBlock');
+      if (errBlock && (errBlock.innerText.indexOf('$(error)') !== -1 || !errBlock.innerText.trim())) {
+        errBlock.style.display = 'none';
+      }
+    };
+  </script>
+</body>
+</html>

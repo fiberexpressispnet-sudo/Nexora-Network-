@@ -146,7 +146,7 @@ export const SupportTicketsPage: React.FC<SupportTicketsPageProps> = ({
 
  const updated = [newTicket, ...tickets];
  saveTickets(updated);
- showToast(`টিকেট #${newTicket.ticketNumber} সফলভাবে খোলা হয়েছে!`, 'success');
+ showToast(`Ticket #${newTicket.ticketNumber} has been opened successfully!`, 'success');
  setIsCreateModalOpen(false);
  setFormData({
  clientId: '',
@@ -171,7 +171,7 @@ export const SupportTicketsPage: React.FC<SupportTicketsPageProps> = ({
  return t;
  });
  saveTickets(updated);
- showToast(`টিকেট স্ট্যাটাস '${nextStatus}'-এ আপডেট করা হয়েছে।`, 'info');
+ showToast(`Ticket status '${nextStatus}' updated.`, 'info');
  };
 
  const filteredTickets = tickets.filter((t) => {
@@ -201,7 +201,7 @@ export const SupportTicketsPage: React.FC<SupportTicketsPageProps> = ({
  </span>
  </h1>
  <p className="text-xs text-slate-900 mt-0.5">
- গ্রাহক অভিযোগ সমাধান, ফিল্ড টেকনিশিয়ান অ্যাসাইন, রেড LOS ফল্ট রিকভারি ও লাইভ স্ট্যাটাস ট্র্যাকার।
+ Subscriber complaint resolution, field technician assignment, Red LOS fault recovery, and live status tracker.
  </p>
  </div>
  </div>
@@ -274,7 +274,7 @@ export const SupportTicketsPage: React.FC<SupportTicketsPageProps> = ({
  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
  {filteredTickets.length === 0 ? (
  <div className="col-span-2 p-12 text-center bg-white border border-slate-200 rounded text-slate-800">
- কোনো সাপোর্ট টিকেট পাওয়া যায়নি।
+ No support tickets found.
  </div>
  ) : (
  filteredTickets.map((ticket) => (

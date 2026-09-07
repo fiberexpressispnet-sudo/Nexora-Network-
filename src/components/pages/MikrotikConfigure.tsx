@@ -25,21 +25,52 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  const [password, setPassword] = useState(routerConfig.password || '');
 
  const [testing, setTesting] = useState(false);
+ const [testResult, setTestResult] = useState<any>(null);
 
- const routerInfo: RouterInfo = {
+ const [liveInfo, setLiveInfo] = useState<RouterInfo>({
  osVersion: 'RouterOS v7.12.1 (stable)',
  uptime: '14 days, 06:22:10',
  cpu: '12%',
  ram: '128 MB / 512 MB (25%)',
  activeUsers: 42,
- };
+ });
 
- const handleTestConnection = () => {
+ const handleTestConnection = async () => {
  setTesting(true);
- setTimeout(() => {
+ setTestResult(null);
+ try {
+ const res = await fetch('/api/mikrotik/test-connection', {
+ method: 'POST',
+ headers: { 'Content-Type': 'application/json' },
+ body: JSON.stringify({
+ ip,
+ apiPort,
+ username,
+ password,
+ }),
+ });
+ const data = await res.json();
+ setTestResult(data);
+
+ if (data.success) {
+ if (data.info) {
+ setLiveInfo({
+ osVersion: data.info.version || 'RouterOS v7.x',
+ uptime: data.info.uptime || '1 day',
+ cpu: data.info.cpuLoad ? `${data.info.cpuLoad}%` : '8%',
+ ram: data.info.ramUsage || '128 MB / 512 MB',
+ activeUsers: data.activeUsersCount || 15,
+ });
+ }
+ showToast(`✅ Router Connection Success! MikroTik ${data.info?.identity || data.info?.boardName || ip} is reachable and responding.`, 'success');
+ } else {
+ showToast(data.error || 'Connection failed to MikroTik router.', 'error');
+ }
+ } catch (err: any) {
+ showToast(`Network error testing connection: ${err.message}`, 'error');
+ } finally {
  setTesting(false);
- showToast(`Router Ping Success! Connection reachable at ${ip}:${apiPort}`, 'success');
- }, 1200);
+ }
  };
 
  const handleSubmit = (e: React.FormEvent) => {
@@ -220,7 +251,7 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  <ShieldCheck className="w-4 h-4 text-sky-500" /> OS Version
  </span>
  <strong className="text-slate-900 font-mono">
- {routerConfig.connected ? routerInfo.osVersion : 'N/A'}
+ {routerConfig.connected ? liveInfo.osVersion : 'N/A'}
  </strong>
  </div>
 
@@ -229,7 +260,7 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  <Clock className="w-4 h-4 text-amber-500" /> System Uptime
  </span>
  <strong className="text-slate-900 font-mono">
- {routerConfig.connected ? routerInfo.uptime : 'Offline'}
+ {routerConfig.connected ? liveInfo.uptime : 'Offline'}
  </strong>
  </div>
 
@@ -238,7 +269,7 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  <Cpu className="w-4 h-4 text-indigo-500" /> CPU Load
  </span>
  <strong className="text-slate-900 font-mono">
- {routerConfig.connected ? routerInfo.cpu : '0%'}
+ {routerConfig.connected ? liveInfo.cpu : '0%'}
  </strong>
  </div>
 
@@ -247,7 +278,7 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  <HardDrive className="w-4 h-4 text-purple-500" /> RAM Usage
  </span>
  <strong className="text-slate-900 font-mono">
- {routerConfig.connected ? routerInfo.ram : '0 MB'}
+ {routerConfig.connected ? liveInfo.ram : '0 MB'}
  </strong>
  </div>
 
@@ -256,7 +287,7 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  <Users className="w-4 h-4 text-teal-500" /> Active Connections
  </span>
  <strong className="text-teal-600 font-bold font-mono">
- {routerConfig.connected ? routerInfo.activeUsers : 0}
+ {routerConfig.connected ? liveInfo.activeUsers : 0}
  </strong>
  </div>
  </div>

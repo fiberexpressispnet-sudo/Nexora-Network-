@@ -154,7 +154,7 @@ export const LiveBandwidthPage: React.FC<LiveBandwidthPageProps> = ({
  </span>
  </h1>
  <p className="text-xs text-slate-900 mt-0.5">
- সার্ভারের আপস্ট্রিম, ব্যান্ডউইথ কনজাম্পশন, পিক ট্রাফিক ও প্রতিটি ক্লায়েন্টের রিয়েল-টাইম স্পিড মনিটর।
+ Server upstream, bandwidth consumption, peak traffic, and real-time subscriber speed monitor.
  </p>
  </div>
  </div>
@@ -313,7 +313,7 @@ export const LiveBandwidthPage: React.FC<LiveBandwidthPageProps> = ({
  <Wifi className="w-4 h-4 text-emerald-500" />
  <span>Per-Client Live Bandwidth Consumption</span>
  </h3>
- <p className="text-xs text-slate-800">প্রতিটি সংযুক্ত গ্রাহকের বর্তমান ডাউনলোড ও আপলোড স্পিড</p>
+ <p className="text-xs text-slate-800">Current download & upload speed for each connected subscriber</p>
  </div>
 
  <div className="relative w-full sm:w-64">
@@ -345,12 +345,12 @@ export const LiveBandwidthPage: React.FC<LiveBandwidthPageProps> = ({
  {filteredClients.length === 0 ? (
  <tr>
  <td colSpan={7} className="p-6 text-center text-slate-800 font-sans">
- কোনো অ্যাক্টিভ ক্লায়েন্ট পাওয়া যায়নি।
+ No active clients found.
  </td>
  </tr>
  ) : (
- filteredClients.map((client) => (
- <tr key={client.id} className="hover:bg-slate-50 transition-colors">
+ filteredClients.map((client, idx) => (
+ <tr key={client.id ? `${client.id}-${idx}` : idx} className="hover:bg-slate-50 transition-colors">
  <td className="p-3 font-sans">
  <div className="font-bold text-slate-900 ">{client.name}</div>
  <div className="text-[11px] text-cyan-500 font-mono">@{client.userId}</div>

@@ -131,7 +131,7 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  <button
  type="button"
  onClick={() => {
- if (window.confirm('আপনি কি নিশ্চিত যে সমস্ত ব্যান্ডউইথ প্রোফাইল মুছে ফেলতে চান? (Hard Reset)')) {
+ if (window.confirm('Are you sure you want to reset all bandwidth profiles? (Hard Reset)')) {
  onHardReset();
  }
  }}
@@ -139,7 +139,7 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  title="Clear all bandwidth profiles"
  >
  <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
- <span>Hard Reset (ডাটা রিসেট)</span>
+ <span>Hard Reset (Reset Data)</span>
  </button>
  )}
  <button
@@ -180,11 +180,11 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  >
  {isMobile ? (
  <>
- <Smartphone className="w-3 h-3" /> মোবাইল এক্সেস (১ টি ডিভাইস)
+ <Smartphone className="w-3 h-3" /> Mobile Access (1 Device)
  </>
  ) : (
  <>
- <Router className="w-3 h-3" /> রাউটার এক্সেস (সবাই শেয়ার করবে)
+ <Router className="w-3 h-3" /> Router Access (Shared by all)
  </>
  )}
  </span>
@@ -225,10 +225,10 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  <div>
  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
- Dynamic Day/Night Speed Scheduler (ডায়নামিক স্পিড শিডিউলার)
+ Dynamic Day/Night Speed Scheduler
  </h4>
  <p className="text-[11px] text-slate-800 mt-1">
- স্বয়ংক্রিয়ভাবে নির্দিষ্ট সময়ের ব্যবধানে গ্রাহকদের ব্যান্ডউইথ বুস্ট করুন (যেমন: অফ-পিক আওয়ারে ১.৫ গুণ বেশি স্পিড)।
+ Automatically boost subscriber bandwidth during off-peak hours (e.g., 1.5x speed at night).
  </p>
  </div>
  <div className="flex items-center gap-2">
@@ -247,7 +247,7 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  <span className="px-2 py-0.5 bg-amber-500/10 text-amber-600 rounded-full font-mono text-[9px] font-bold">09:00 AM - 11:00 PM</span>
  </div>
  <div className="text-xs text-slate-800">
- দিনের পক আওয়ারে গ্রাহকরা তাদের নির্ধারিত মূল প্যাকেজ স্পিড (যেমন ১০ এমবিপিএস) পাবেন।
+ Subscribers receive regular package speed during peak daytime hours.
  </div>
  <div className="text-[11px] font-bold text-amber-500 flex items-center gap-1">
  <span>Status:</span> <span className="underline">Standard Speeds Enforced</span>
@@ -261,7 +261,7 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-600 rounded-full font-mono text-[9px] font-bold">11:00 PM - 09:00 AM</span>
  </div>
  <div className="text-xs text-slate-800">
- রাত ১১টা থেকে সকাল ৯টা পর্যন্ত গ্রাহকদের প্রোফাইল স্বয়ংক্রিয়ভাবে <span className="font-bold text-indigo-500">১.৫ গুণ বৃদ্ধি</span> করা হবে।
+ From 11 PM to 9 AM, subscriber bandwidth is automatically boosted by <span className="font-bold text-indigo-500">1.5x</span>.
  </div>
  <div className="text-[11px] font-bold text-indigo-500 flex items-center gap-1">
  <span>Dynamic Up-scaling:</span> <span className="underline">1.5x Auto-Boost Active</span>
@@ -272,7 +272,7 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  <div className="p-4 rounded border border-slate-100 bg-slate-50/50 space-y-3 flex flex-col justify-between">
  <div>
  <span className="font-bold text-xs text-slate-800 ">Scheduler Engine Config</span>
- <p className="text-[10px] text-slate-800 mt-1">মাস্টার রি-শিডিউলিং ক্রন-টাস্ক এডিট করুন:</p>
+ <p className="text-[10px] text-slate-800 mt-1">Edit master rescheduling cron-task:</p>
  </div>
  <button
  type="button"
@@ -304,7 +304,7 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
 
  <div>
  <label className="block text-xs font-bold text-slate-800 mb-1">
- Device Target Option (ব্যবহারের ধরন) *
+ Device Target Option *
  </label>
  <div className="grid grid-cols-2 gap-2 pt-1">
  <button
@@ -317,10 +317,10 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  }`}
  >
  <div className="flex items-center gap-1.5 text-xs font-bold">
- <Smartphone className="w-4 h-4 text-amber-500" /> মোবাইল এক্সেস
+ <Smartphone className="w-4 h-4 text-amber-500" /> Mobile Access
  </div>
  <p className="text-[10px] text-slate-800 mt-1 font-normal">
- শুধুমাত্র ১ টি মোবাইল ফোনে এক্টিভ চলবে।
+ Active on only 1 mobile phone.
  </p>
  </button>
 
@@ -334,10 +334,10 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  }`}
  >
  <div className="flex items-center gap-1.5 text-xs font-bold">
- <Router className="w-4 h-4 text-sky-500" /> রাউটার এক্সেস
+ <Router className="w-4 h-4 text-sky-500" /> Router Access
  </div>
  <p className="text-[10px] text-slate-800 mt-1 font-normal">
- রাউটারে সংযুক্ত সবাই ইন্টারনেট পাবে।
+ All router connected devices will get internet access.
  </p>
  </button>
  </div>
@@ -441,7 +441,7 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
 
  <div>
  <label className="block text-xs font-bold text-slate-800 mb-1">
- Device Target Option (ব্যবহারের ধরন)
+ Device Target Option
  </label>
  <div className="grid grid-cols-2 gap-2 pt-1">
  <button
@@ -454,10 +454,10 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  }`}
  >
  <div className="flex items-center gap-1.5 text-xs font-bold">
- <Smartphone className="w-4 h-4 text-amber-500" /> মোবাইল এক্সেস
+ <Smartphone className="w-4 h-4 text-amber-500" /> Mobile Access
  </div>
  <p className="text-[10px] text-slate-800 mt-1 font-normal">
- শুধুমাত্র ১ টি মোবাইল কানেকশন।
+ Single mobile connection only.
  </p>
  </button>
 
@@ -471,10 +471,10 @@ export const BandwidthPage: React.FC<BandwidthProps> = ({
  }`}
  >
  <div className="flex items-center gap-1.5 text-xs font-bold">
- <Router className="w-4 h-4 text-sky-500" /> রাউটার এক্সেস
+ <Router className="w-4 h-4 text-sky-500" /> Router Access
  </div>
  <p className="text-[10px] text-slate-800 mt-1 font-normal">
- রাউটার থেকে সবাই এক্সেস করতে পারবে।
+ Shared access from router.
  </p>
  </button>
  </div>

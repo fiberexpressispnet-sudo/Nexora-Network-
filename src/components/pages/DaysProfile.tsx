@@ -165,11 +165,11 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  <Calendar className="w-6 h-6" />
  </div>
  <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
- Days Profiles (মেয়াদের প্রোফাইল)
+ Days Profiles (Validity Profiles)
  </h2>
  </div>
  <p className="text-xs text-slate-900 max-w-2xl">
- ক্লাইন্ট আইডি তৈরি ও রিনিউ করার সময় কতদিন মেয়াদ (যেমন ১, ৭, ১৫, ৩০, ৯০ বা ৩৬৫ দিন) হবে তা সেভ করে রাখুন। ক্লাইন্ট যুক্ত করতে গেলে ১-ক্লিকেই অটোমেটিক এক্সপায়ারি ডেট হিসাব হয়ে যাবে!
+ Save validity durations (e.g. 1, 7, 15, 30, 90, or 365 days) used during client creation and renewals for 1-click automatic expiry calculation!
  </p>
  </div>
 
@@ -178,7 +178,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  <button
  type="button"
  onClick={() => {
- if (window.confirm('আপনি কি নিশ্চিত যে মেয়াদের সমস্ত প্রোফাইল ডাটা মুছে ফেলতে চান? (Hard Reset)')) {
+ if (window.confirm('Are you sure you want to clear all validity profile data? (Hard Reset)')) {
  onHardReset();
  }
  }}
@@ -186,7 +186,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  title="Clear all days profile data"
  >
  <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
- <span>Hard Reset (ডাটা রিসেট)</span>
+ <span>Hard Reset (Reset Data)</span>
  </button>
  )}
 
@@ -194,7 +194,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  onClick={() => setAddModalOpen(true)}
  className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded text-xs flex items-center gap-2 shadow-md transition-all cursor-pointer"
  >
- <Plus className="w-4 h-4" /> নতুন Days Profile খুলুন
+ <Plus className="w-4 h-4" /> Add New Days Profile
  </button>
  </div>
  </div>
@@ -202,13 +202,13 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  {/* Expiry Calculator Preview Widget */}
  <div className="bg-white/70 backdrop-blur-md border border-white/40 rounded p-4 sm:p-5 shadow-xs">
  <div className="flex items-center gap-2 text-xs font-bold text-sky-600 mb-3 uppercase tracking-wider">
- <Sparkles className="w-4 h-4" /> টেস্ট মেয়াদের ক্যালকুলেটর (Quick Validity Test)
+ <Sparkles className="w-4 h-4" /> Quick Validity Test Calculator
  </div>
 
  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
  <div>
  <label className="block text-[11px] font-semibold text-slate-800 mb-1">
- Select Days Profile (প্রোফাইল নির্বাচন)
+ Select Days Profile
  </label>
  <select
  value={testProfileId}
@@ -217,7 +217,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  >
  {daysProfiles.map((p) => (
  <option key={p.id} value={p.id}>
- {p.name} ({p.days} দিন {p.graceDays > 0 ? `+${p.graceDays} গ্রেস` : ''})
+ {p.name} ({p.days} days {p.graceDays > 0 ? `+${p.graceDays} grace` : ''})
  </option>
  ))}
  </select>
@@ -225,7 +225,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
 
  <div>
  <label className="block text-[11px] font-semibold text-slate-800 mb-1">
- Start Date (মেয়াদের শুরুর তারিখ)
+ Start Date
  </label>
  <input
  type="date"
@@ -298,16 +298,16 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  {/* Specs Badge Pill */}
  <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
  <div className="p-2.5 rounded bg-slate-100/70 border border-slate-200/60 ">
- <span className="text-[10px] text-slate-800 block font-semibold">মেয়াদ (Duration)</span>
+ <span className="text-[10px] text-slate-800 block font-semibold">Duration</span>
  <span className="font-extrabold text-slate-900 font-mono text-sm">
- {p.days} দিন
+ {p.days} days
  </span>
  </div>
 
  <div className="p-2.5 rounded bg-slate-100/70 border border-slate-200/60 ">
- <span className="text-[10px] text-slate-800 block font-semibold">গ্রেস বোনাস</span>
+ <span className="text-[10px] text-slate-800 block font-semibold">Grace Bonus</span>
  <span className="font-bold text-teal-600 font-mono text-xs">
- +{p.graceDays} দিন বোনাস
+ +{p.graceDays} days bonus
  </span>
  </div>
  </div>
@@ -317,15 +317,15 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-900 ">
  {p.deviceType === 'Mobile' ? (
  <>
- <Smartphone className="w-3.5 h-3.5 text-amber-500" /> মোবাইল
+ <Smartphone className="w-3.5 h-3.5 text-amber-500" /> Mobile
  </>
  ) : p.deviceType === 'Router' ? (
  <>
- <Router className="w-3.5 h-3.5 text-sky-500" /> রাউটার
+ <Router className="w-3.5 h-3.5 text-sky-500" /> Router
  </>
  ) : (
  <>
- <Layers className="w-3.5 h-3.5 text-indigo-500" /> সব ডিভাইস
+ <Layers className="w-3.5 h-3.5 text-indigo-500" /> All Devices
  </>
  )}
  </span>
@@ -384,20 +384,20 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  {/* MODAL: ADD DAYS PROFILE */}
  <Modal
  isOpen={addModalOpen}
- title="নতুন Days Profile যুক্ত করুন"
+ title="Add New Days Profile"
  onClose={() => setAddModalOpen(false)}
  >
  <form onSubmit={handleCreate} className="space-y-4">
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- প্রোফাইলের নাম (Profile Name) *
+ Profile Name (Profile Name) *
  </label>
  <input
  type="text"
  required
  value={name}
  onChange={(e) => setName(e.target.value)}
- placeholder="যেমন: ৩০ দিনের নিয়মিত মান্থলি, ৭ দিনের ট্রায়াল..."
+ placeholder="e.g. 30 Days Monthly Regular, 7 Days Trial..."
  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white/50 text-xs text-slate-800 focus:outline-none focus:border-[#3c8dbc]"
  />
  </div>
@@ -405,7 +405,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  <div className="grid grid-cols-2 gap-3">
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- মেয়াদের দিন সংখ্যা (Days) *
+ Duration (Days) (Days) *
  </label>
  <input
  type="number"
@@ -420,7 +420,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
 
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- গ্রেস বোনাস দিন (Grace Days)
+ Grace Bonus days (Grace Days)
  </label>
  <input
  type="number"
@@ -435,28 +435,28 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
 
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- ডিভাইসের টাইপ পছন্দ (Device Target)
+ Device Target Type
  </label>
  <select
  value={deviceType}
  onChange={(e) => setDeviceType(e.target.value as 'All' | 'Mobile' | 'Router')}
  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white/50 text-xs text-slate-800 focus:outline-none focus:border-[#3c8dbc]"
  >
- <option value="All">সব ডিভাইস (All Access)</option>
- <option value="Mobile">শুধুমাত্র মোবাইল (Mobile Access)</option>
- <option value="Router">শুধুমাত্র রাউটার (Router Access)</option>
+ <option value="All">All Devices (All Access)</option>
+ <option value="Mobile">Mobile Only (Mobile Access)</option>
+ <option value="Router">Router Only (Router Access)</option>
  </select>
  </div>
 
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- বিবরণ (Description)
+ Description (Description)
  </label>
  <textarea
  rows={2}
  value={description}
  onChange={(e) => setDescription(e.target.value)}
- placeholder="যেমন: ১ মাসের স্ট্যান্ডার্ড ব্রডব্যান্ড কানেকশন..."
+ placeholder="e.g. Standard 1-month broadband subscription..."
  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white/50 text-xs text-slate-800 focus:outline-none focus:border-[#3c8dbc] resize-none"
  />
  </div>
@@ -470,7 +470,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
  />
  <label htmlFor="chkDefault" className="text-xs font-semibold text-slate-700 cursor-pointer">
- ডিফল্ট মেয়াদের প্রোফাইল হিসেবে সেট করুন (Set as Default)
+ Set as Default Validity Profile
  </label>
  </div>
 
@@ -480,13 +480,13 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  onClick={() => setAddModalOpen(false)}
  className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 transition-colors cursor-pointer"
  >
- বাতিল
+ Cancel
  </button>
  <button
  type="submit"
  className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
  >
- সেভ করুন
+ Save Profile
  </button>
  </div>
  </form>
@@ -501,7 +501,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  <form onSubmit={handleSaveEdit} className="space-y-4">
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- প্রোফাইলের নাম *
+ Profile Name *
  </label>
  <input
  type="text"
@@ -515,7 +515,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  <div className="grid grid-cols-2 gap-3">
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- মেয়াদের দিন সংখ্যা (Days) *
+ Duration (Days) (Days) *
  </label>
  <input
  type="number"
@@ -529,7 +529,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
 
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- গ্রেস বোনাস দিন
+ Grace Bonus days
  </label>
  <input
  type="number"
@@ -544,22 +544,22 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  <div className="grid grid-cols-2 gap-3">
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- ডিভাইসের টাইপ
+ Device Target
  </label>
  <select
  value={editDeviceType}
  onChange={(e) => setEditDeviceType(e.target.value as 'All' | 'Mobile' | 'Router')}
  className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white/50 text-xs text-slate-800 focus:outline-none focus:border-[#3c8dbc]"
  >
- <option value="All">সব ডিভাইস</option>
- <option value="Mobile">মোবাইল</option>
- <option value="Router">রাউটার</option>
+ <option value="All">All Devices</option>
+ <option value="Mobile">Mobile</option>
+ <option value="Router">Router</option>
  </select>
  </div>
 
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- স্ট্যাটাস
+ Status
  </label>
  <select
  value={editStatus}
@@ -574,7 +574,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
 
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- বিবরণ (Description)
+ Description (Description)
  </label>
  <textarea
  rows={2}
@@ -593,7 +593,7 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
  />
  <label htmlFor="chkEditDefault" className="text-xs font-semibold text-slate-700 cursor-pointer">
- ডিফল্ট মেয়াদের প্রোফাইল হিসেবে সেট করুন
+ Set as Default Profile
  </label>
  </div>
 
@@ -603,13 +603,13 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  onClick={() => setEditProfile(null)}
  className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 transition-colors cursor-pointer"
  >
- বাতিল
+ Cancel
  </button>
  <button
  type="submit"
  className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
  >
- পরিবর্তন সেভ করুন
+ Save Profile Changes
  </button>
  </div>
  </form>
@@ -618,14 +618,14 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  {/* MODAL: DELETE CONFIRMATION */}
  <Modal
  isOpen={Boolean(deleteProfile)}
- title="প্রোফাইল মুছুন"
+ title="Delete Profile"
  onClose={() => setDeleteProfile(null)}
  maxWidth="max-w-sm"
  >
  {deleteProfile && (
  <div className="space-y-4 text-center">
  <p className="text-xs text-slate-900 ">
- আপনি কি নিশ্চিত যে <strong className="text-slate-900 ">{deleteProfile.name}</strong> মুছতে চান?
+ Are you sure you want to delete <strong className="text-slate-900 ">{deleteProfile.name}</strong> Are you sure you want to delete
  </p>
 
  <div className="flex justify-center gap-2 pt-2">
@@ -633,13 +633,13 @@ export const DaysProfilePage: React.FC<DaysProfileProps> = ({
  onClick={() => setDeleteProfile(null)}
  className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 transition-colors cursor-pointer"
  >
- বাতিল
+ Cancel
  </button>
  <button
  onClick={() => handleDelete(deleteProfile)}
  className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm"
  >
- হ্যাঁ, মুছে ফেলুন
+ Yes, Delete
  </button>
  </div>
  </div>

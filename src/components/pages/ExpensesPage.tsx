@@ -120,7 +120,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({
  e.preventDefault();
  const amountVal = parseFloat(formData.amount);
  if (!formData.title || isNaN(amountVal) || amountVal <= 0) {
- showToast('অনুগ্রহ করে সঠিক খরচের তথ্য ও পরিমাণ লিখুন।', 'error');
+ showToast('Please enter valid expense details and amount.', 'error');
  return;
  }
 
@@ -140,7 +140,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({
 
  const updated = [newExpense, ...expenses];
  saveExpenses(updated);
- showToast(`খরচ সফলভাবে যুক্ত করা হয়েছে! (৳${amountVal.toLocaleString()})`, 'success');
+ showToast(`Expense recorded successfully! (৳${amountVal.toLocaleString()})`, 'success');
  setIsAddModalOpen(false);
  setFormData({
  title: '',
@@ -155,10 +155,10 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({
  };
 
  const handleDelete = (id: string) => {
- if (window.confirm('আপনি কি নিশ্চিত যে এই খরচের রেকর্ডটি মুছে ফেলতে চান?')) {
+ if (window.confirm('Are you sure you want to delete this expense record?')) {
  const updated = expenses.filter((e) => e.id !== id);
  saveExpenses(updated);
- showToast('খরচের রেকর্ড মুছে ফেলা হয়েছে।', 'info');
+ showToast('Expense record deleted.', 'info');
  }
  };
 
@@ -204,7 +204,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({
  </span>
  </h1>
  <p className="text-xs text-slate-900 mt-0.5">
- ব্যান্ডউইথ আপস্ট্রিম বিল, বিদ্যুৎ, কর্মীদের বেতন, সার্ভার ভাড়া ও অফিসের যাবতীয় খরচের হিসাব।
+ Bandwidth upstream bills, electricity, staff salaries, server costs, and office OPEX tracking.
  </p>
  </div>
  </div>
@@ -222,7 +222,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({
  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono">
  <div className="bg-white border border-slate-200 rounded p-4 sm:p-5 shadow-sm space-y-1">
  <div className="flex items-center justify-between text-xs text-slate-800 font-sans">
- <span className="font-bold">Total Month Revenue (আয়)</span>
+ <span className="font-bold">Total Month Revenue</span>
  <TrendingUp className="w-4 h-4 text-emerald-500" />
  </div>
  <div className="text-2xl sm:text-3xl font-black text-emerald-500">
@@ -233,7 +233,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({
 
  <div className="bg-white border border-slate-200 rounded p-4 sm:p-5 shadow-sm space-y-1">
  <div className="flex items-center justify-between text-xs text-slate-800 font-sans">
- <span className="font-bold">Total Month Expenses (ব্যয়)</span>
+ <span className="font-bold">Total Month Expenses</span>
  <TrendingDown className="w-4 h-4 text-rose-500" />
  </div>
  <div className="text-2xl sm:text-3xl font-black text-rose-500">
@@ -244,7 +244,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({
 
  <div className="bg-white border border-slate-200 rounded p-4 sm:p-5 shadow-sm space-y-1">
  <div className="flex items-center justify-between text-xs text-slate-800 font-sans">
- <span className="font-bold">Net Profit / Margin (নিট লাভ)</span>
+ <span className="font-bold">Net Profit / Margin</span>
  <Wallet className="w-4 h-4 text-sky-500" />
  </div>
  <div className={`text-2xl sm:text-3xl font-black ${netProfit >= 0 ? 'text-sky-500' : 'text-red-500'}`}>
@@ -320,7 +320,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({
  {filteredExpenses.length === 0 ? (
  <tr>
  <td colSpan={7} className="p-8 text-center text-slate-800">
- কোনো খরচের রেকর্ড পাওয়া যায়নি।
+ No expense records found.
  </td>
  </tr>
  ) : (

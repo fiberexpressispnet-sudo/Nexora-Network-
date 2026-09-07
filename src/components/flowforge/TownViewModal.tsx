@@ -196,9 +196,9 @@ export const TownViewModal: React.FC<TownViewModalProps> = ({
  </td>
  </tr>
  ) : (
- filteredClients.map((client) => (
+ filteredClients.map((client, idx) => (
  <tr
- key={client.id}
+ key={client.id ? `${client.id}-${idx}` : idx}
  onClick={() => onSelectClient?.(client)}
  className="hover:bg-white cursor-pointer"
  >

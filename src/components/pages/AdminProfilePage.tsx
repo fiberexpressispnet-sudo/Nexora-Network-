@@ -69,21 +69,21 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({
  const handleSaveProfile = (e: React.FormEvent) => {
   e.preventDefault();
   onSaveAdminProfile(profile);
-  showToast('অ্যাডমিন প্রোফাইল সফলভাবে আপডেট করা হয়েছে!', 'success');
+  showToast('Admin profile updated successfully!', 'success');
  };
 
  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
   const file = e.target.files?.[0];
   if (file) {
    if (file.size > 1.5 * 1024 * 1024) {
-    showToast('ফাইল সাইজ ১.৫ এমবি এর বেশি হতে পারবে না!', 'error');
+    showToast('File size must not exceed 1.5 MB!', 'error');
     return;
    }
    const reader = new FileReader();
    reader.onload = (event) => {
     const base64String = event.target?.result as string;
     setProfile((prev) => ({ ...prev, avatar: base64String }));
-    showToast('প্রোফাইল পিকচার সিলেক্ট করা হয়েছে। নিচে সেভ বাটনে ক্লিক করুন।', 'info');
+    showToast('Profile picture selected. Click Save button below.', 'info');
    };
    reader.readAsDataURL(file);
   }
@@ -92,10 +92,10 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({
  const handlePasswordSubmit = (e: React.FormEvent) => {
   e.preventDefault();
   if (newPass !== confirmPass) {
-   showToast('পাসওয়ার্ড কনফার্মেশন মিলছে না!', 'error');
+   showToast('Password confirmation does not match!', 'error');
    return;
   }
-  showToast('পাসওয়ার্ড পরিবর্তন সফল হয়েছে!', 'success');
+  showToast('Password changed successfully!', 'success');
   setCurrentPass('');
   setNewPass('');
   setConfirmPass('');
@@ -117,7 +117,7 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({
        </span>
       </h1>
       <p className="text-xs text-slate-950 mt-0.5 font-medium">
-       অ্যাডমিনিস্ট্রেটর অ্যাকাউন্ট তথ্য, সিকিউরিটি ক্রেডেনশিয়াল ও ডিভাইস সেশন কন্ট্রোল।
+       Administrator account info, security credentials, and device session control.
       </p>
      </div>
     </div>
@@ -238,7 +238,7 @@ export const AdminProfilePage: React.FC<AdminProfilePageProps> = ({
         </div>
 
         <div className="sm:col-span-2">
-         <label className="block font-bold text-slate-950 mb-1">Address / ঠিকানা</label>
+         <label className="block font-bold text-slate-950 mb-1">Address</label>
          <textarea
           rows={2}
           value={profile.address}

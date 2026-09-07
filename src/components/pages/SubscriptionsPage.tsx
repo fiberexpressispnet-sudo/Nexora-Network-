@@ -147,7 +147,7 @@ export const SubscriptionsPage: React.FC<SubscriptionsPageProps> = ({
 
  onRenewClient(selectedClientForRenew.id, renewMonths, totalAmount, paymentMethod);
  showToast(
- `প্যাকেজ নবায়ন সম্পন্ন! ${selectedClientForRenew.name}-এর মেয়াদ ${renewMonths} মাস বাড়ানো হয়েছে।`,
+ `Package renewal completed! ${selectedClientForRenew.name} validity extended by ${renewMonths} month(s).`,
  'success'
  );
  setSelectedClientForRenew(null);
@@ -170,7 +170,7 @@ export const SubscriptionsPage: React.FC<SubscriptionsPageProps> = ({
  </span>
  </h1>
  <p className="text-xs text-slate-900 mt-0.5">
- গ্রাহকদের প্যাকেজের মেয়াদ উত্তীর্ণের রিয়েল-টাইম ট্র্যাকিং, SMS রিমাইন্ডার ও তাৎক্ষণিক অটো-রিনিউয়াল হাব।
+ Real-time subscriber expiry tracking, SMS reminders, and instant auto-renewal hub.
  </p>
  </div>
  </div>
@@ -180,7 +180,7 @@ export const SubscriptionsPage: React.FC<SubscriptionsPageProps> = ({
  <button
  onClick={() => {
  categorized.today.concat(categorized.tomorrow).forEach((c) => onSendSmsReminder(c));
- showToast('সকল মেয়াদোত্তীর্ণ গ্রাহককে এক ক্লিকে SMS রিমাইন্ডার পাঠানো হয়েছে!', 'success');
+ showToast('SMS reminder sent to all expired subscribers with 1 click!', 'success');
  }}
  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded shadow-md transition-all cursor-pointer flex items-center gap-1.5"
  >
@@ -338,7 +338,7 @@ export const SubscriptionsPage: React.FC<SubscriptionsPageProps> = ({
  {filteredList.length === 0 ? (
  <tr>
  <td colSpan={7} className="p-8 text-center text-slate-800">
- কোনো ক্লায়েন্ট পাওয়া যায়নি।
+ No clients found.
  </td>
  </tr>
  ) : (

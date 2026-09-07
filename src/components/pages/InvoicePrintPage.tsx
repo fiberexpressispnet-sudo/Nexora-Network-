@@ -60,7 +60,7 @@ export const InvoicePrintPage: React.FC<InvoicePrintPageProps> = ({
  </span>
  </h1>
  <p className="text-xs text-slate-900 mt-0.5">
- অফিশিয়াল ইনভয়েস জেনারেট, ডিরেক্ট প্রিন্ট, মানি রিসিট ও ওয়াটসঅ্যাপ শেয়ার।
+ Official invoice generation, direct printing, money receipts, and WhatsApp sharing.
  </p>
  </div>
  </div>

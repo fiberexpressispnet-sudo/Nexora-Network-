@@ -4,6 +4,7 @@ import {
  PaymentRecord,
  HotspotUser,
  HotspotPackageRequest,
+ OnlinePackageOrder,
  RouterConfig,
  AppSettings,
  PageId,
@@ -38,6 +39,7 @@ import {
  UserCheck,
  UserX,
  Bell,
+ ShoppingCart,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { getClientExpiryInfo } from '../../lib/expiryUtils';
@@ -51,6 +53,7 @@ interface DashboardProps {
  payments: PaymentRecord[];
  hotspotUsers: HotspotUser[];
  hotspotRequests?: HotspotPackageRequest[];
+ onlineOrders?: OnlinePackageOrder[];
  routerConfig: RouterConfig;
  settings: AppSettings;
  onConnectRouter: () => void;
@@ -58,6 +61,7 @@ interface DashboardProps {
  onNavigate: (page: PageId) => void;
  onApproveRequest?: (id: string, createdUserId?: string) => void;
  onRejectRequest?: (id: string) => void;
+ onApproveOnlineOrder?: (orderId: string) => void;
  onHardResetAll?: () => void;
  onCollectPayment?: (payment: any) => void;
  onBulkImportClients?: (clients: Client[]) => void;
@@ -68,6 +72,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
  payments,
  hotspotUsers,
  hotspotRequests = [],
+ onlineOrders = [],
  routerConfig,
  settings,
  onConnectRouter,
@@ -75,6 +80,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
  onNavigate,
  onApproveRequest,
  onRejectRequest,
+ onApproveOnlineOrder,
  onHardResetAll,
  onCollectPayment,
  onBulkImportClients,
@@ -187,6 +193,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
  </button>
  )}
  </div>
+
+ {/* Pending Online Package Purchases Alert */}
+ {onlineOrders.filter((o) => o.status === 'pending').length > 0 && (
+  <div className="bg-gradient-to-r from-cyan-500/15 via-blue-500/15 to-emerald-500/15 border-2 border-cyan-500/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+   <div className="flex items-center gap-3">
+    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shrink-0 shadow-xs">
+     <ShoppingCart className="w-5 h-5 animate-bounce" />
+    </div>
+    <div>
+     <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+      <span>{onlineOrders.filter((o) => o.status === 'pending').length}টি নতুন প্যাকেজ ক্রয় ভেরিফিকেশন রিকোয়েস্ট পেন্ডিং</span>
+      <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500 text-slate-950 font-black animate-pulse">
+       Action Required
+      </span>
+     </h4>
+     <p className="text-xs text-slate-600 font-medium">
+      গ্রাহক পেমেন্ট সম্পন্ন করে TrxID সাবমিট করেছেন। যাচাই করে মাইক্রোটিকে সক্রিয় করুন।
+     </p>
+    </div>
+   </div>
+   <button
+    type="button"
+    onClick={() => onNavigate('notifications')}
+    className="px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-800 text-white font-black text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 self-start sm:self-auto"
+   >
+    <span>পেমেন্ট যাচাই ও অনুমোদন করুন</span>
+    <ArrowRight className="w-3.5 h-3.5" />
+   </button>
+  </div>
+ )}
 
       {/* Pending Hotspot Requests Alert if any */}
  {hotspotRequests.filter((r) => r.status === 'pending').length > 0 && (
@@ -361,11 +397,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
  </tr>
  </thead>
  <tbody className="divide-y divide-slate-200">
- {filteredSubscribers.slice(0, 8).map((client) => {
+ {filteredSubscribers.slice(0, 8).map((client, idx) => {
  const expiryInfo = getClientExpiryInfo(client.expiry);
 
  return (
- <tr key={client.id} className="hover:bg-white transition-colors">
+ <tr key={client.id ? `${client.id}-${idx}` : idx} className="hover:bg-white transition-colors">
  <td className="p-3 font-bold text-slate-900">
  <div>{client.name}</div>
  <div className="text-[10px] text-blue-100 font-mono">{client.phone}</div>

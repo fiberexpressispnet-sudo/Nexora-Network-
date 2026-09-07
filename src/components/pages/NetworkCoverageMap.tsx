@@ -126,7 +126,7 @@ export const NetworkCoverageMap: React.FC<NetworkCoverageMapProps> = ({
  </span>
  </h1>
  <p className="text-xs text-slate-900 mt-0.5">
- কোর রাউটার, OLT, অপটিক্যাল স্প্লিটার, ডিস্ট্রিবিউশন বক্স এবং গ্রাহক ফাইবারের লাইভ সিগন্যাল পাওয়ার (-dBm)।
+ Core router, OLT, optical splitters, distribution boxes, and subscriber fiber live signal power (-dBm).
  </p>
  </div>
  </div>

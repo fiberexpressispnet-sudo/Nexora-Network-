@@ -123,6 +123,18 @@ export const PackagesPage: React.FC<PackagesProps> = ({
  setDeleteConfirmId(null);
  };
 
+ const parsePrice = (priceStr: string | number): number => {
+   if (typeof priceStr === 'number') return priceStr;
+   if (!priceStr) return 0;
+   const num = parseFloat(String(priceStr).replace(/[^\d.]/g, ''));
+   return isNaN(num) ? 0 : num;
+ };
+
+ // Sort packages by price ascending (cheapest packages at top, higher price lower)
+ const sortedPackages = [...packages].sort(
+   (a, b) => parsePrice(a.price) - parsePrice(b.price)
+ );
+
  return (
  <div className="space-y-6">
  <div className="flex justify-between items-center flex-wrap gap-3">
@@ -134,7 +146,7 @@ export const PackagesPage: React.FC<PackagesProps> = ({
  <button
  type="button"
  onClick={() => {
- if (window.confirm('আপনি কি নিশ্চিত যে সমস্ত প্যাকেজ লিস্ট মুছে ফেলতে চান? (Hard Reset)')) {
+ if (window.confirm('Are you sure you want to reset all packages? (Hard Reset)')) {
  onHardReset();
  }
  }}
@@ -142,7 +154,7 @@ export const PackagesPage: React.FC<PackagesProps> = ({
  title="Clear all package data"
  >
  <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
- <span>Hard Reset (ডাটা রিসেট)</span>
+ <span>Hard Reset (Reset Data)</span>
  </button>
  )}
  <button
@@ -192,7 +204,7 @@ export const PackagesPage: React.FC<PackagesProps> = ({
   </div>
 
   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-    {packages.map((p, idx) => {
+    {sortedPackages.map((p, idx) => {
       const isMobile = p.deviceType === 'Mobile';
       const numericSpeed = p.speed.replace(/\D/g, '');
       
@@ -334,7 +346,7 @@ export const PackagesPage: React.FC<PackagesProps> = ({
 
  <div>
  <label className="block text-xs font-bold text-slate-800 mb-1">
- Device Target Option (ব্যবহারের ধরন) *
+ Device Target Option *
  </label>
  <div className="grid grid-cols-2 gap-2 pt-1">
  <button
@@ -347,10 +359,10 @@ export const PackagesPage: React.FC<PackagesProps> = ({
  }`}
  >
  <div className="flex items-center gap-1.5 text-xs font-bold">
- <Smartphone className="w-4 h-4 text-amber-500" /> মোবাইল প্যাকেজ
+ <Smartphone className="w-4 h-4 text-amber-500" /> Mobile Package
  </div>
  <p className="text-[10px] text-slate-800 mt-1 font-normal">
- মোবাইলে ব্যবহারের জন্য (১ টি ডিভাইস)।
+ For single mobile device usage.
  </p>
  </button>
 
@@ -364,10 +376,10 @@ export const PackagesPage: React.FC<PackagesProps> = ({
  }`}
  >
  <div className="flex items-center gap-1.5 text-xs font-bold">
- <Router className="w-4 h-4 text-sky-500" /> রাউটার প্যাকেজ
+ <Router className="w-4 h-4 text-sky-500" /> Router Package
  </div>
  <p className="text-[10px] text-slate-800 mt-1 font-normal">
- রাউটার কানেকশনের জন্য (শেয়ারড সাবনেট)।
+ For Wi-Fi router / shared subnet connections.
  </p>
  </button>
  </div>
@@ -390,7 +402,7 @@ export const PackagesPage: React.FC<PackagesProps> = ({
 
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- Validity / Duration (মেয়াদ)
+ Validity / Duration
  </label>
  <div className="flex flex-wrap gap-1 mb-1.5">
  <button
@@ -398,14 +410,14 @@ export const PackagesPage: React.FC<PackagesProps> = ({
  onClick={() => setNewValidity('24 Hours')}
  className="px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 border border-amber-500/30 text-[10px] font-bold transition-colors cursor-pointer"
  >
- ⚡ ২৪ ঘন্টা (24 Hours)
+ ⚡ 24 Hours
  </button>
  <button
  type="button"
  onClick={() => setNewValidity('30 Days')}
  className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 border border-emerald-500/30 text-[10px] font-bold transition-colors cursor-pointer"
  >
- 📅 ৩০ দিন (30 Days)
+ 📅 30 Days
  </button>
  {daysProfiles.length > 0 && daysProfiles.map((dp) => (
  <button
@@ -509,7 +521,7 @@ export const PackagesPage: React.FC<PackagesProps> = ({
 
  <div>
  <label className="block text-xs font-bold text-slate-800 mb-1">
- Device Target Option (ব্যবহারের ধরন)
+ Device Target Option
  </label>
  <div className="grid grid-cols-2 gap-2 pt-1">
  <button
@@ -522,10 +534,10 @@ export const PackagesPage: React.FC<PackagesProps> = ({
  }`}
  >
  <div className="flex items-center gap-1.5 text-xs font-bold">
- <Smartphone className="w-4 h-4 text-amber-500" /> মোবাইল প্যাকেজ
+ <Smartphone className="w-4 h-4 text-amber-500" /> Mobile Package
  </div>
  <p className="text-[10px] text-slate-800 mt-1 font-normal">
- ১ টি মোবাইল ডিভাইস।
+ Single mobile device.
  </p>
  </button>
 
@@ -539,10 +551,10 @@ export const PackagesPage: React.FC<PackagesProps> = ({
  }`}
  >
  <div className="flex items-center gap-1.5 text-xs font-bold">
- <Router className="w-4 h-4 text-sky-500" /> রাউটার প্যাকেজ
+ <Router className="w-4 h-4 text-sky-500" /> Router Package
  </div>
  <p className="text-[10px] text-slate-800 mt-1 font-normal">
- রাউটার ব্রডব্যান্ড (শেয়ারড)।
+ Wi-Fi Router (Shared).
  </p>
  </button>
  </div>
@@ -564,7 +576,7 @@ export const PackagesPage: React.FC<PackagesProps> = ({
 
  <div>
  <label className="block text-xs font-semibold text-slate-700 mb-1">
- Validity / Duration (মেয়াদ)
+ Validity / Duration
  </label>
  <div className="flex flex-wrap gap-1 mb-1.5">
  <button
@@ -572,14 +584,14 @@ export const PackagesPage: React.FC<PackagesProps> = ({
  onClick={() => setEditValidity('24 Hours')}
  className="px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 border border-amber-500/30 text-[10px] font-bold transition-colors cursor-pointer"
  >
- ⚡ ২৪ ঘন্টা (24 Hours)
+ ⚡ 24 Hours
  </button>
  <button
  type="button"
  onClick={() => setEditValidity('30 Days')}
  className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 border border-emerald-500/30 text-[10px] font-bold transition-colors cursor-pointer"
  >
- 📅 ৩০ দিন (30 Days)
+ 📅 30 Days
  </button>
  {daysProfiles.length > 0 && daysProfiles.map((dp) => (
  <button

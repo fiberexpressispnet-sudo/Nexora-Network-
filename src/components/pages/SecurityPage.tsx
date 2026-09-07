@@ -52,10 +52,10 @@ export const SecurityPage: React.FC<SecurityPageProps> = ({
  const handlePasswordChange = (e: React.FormEvent) => {
  e.preventDefault();
  if (!newPassword || newPassword !== confirmPassword) {
- showToast('নতুন পাসওয়ার্ড এবং নিশ্চিতকরণ মিলছে না!', 'error');
+ showToast('New password and confirmation do not match!', 'error');
  return;
  }
- showToast('অ্যাডমিন পাসওয়ার্ড সফলভাবে আপডেট করা হয়েছে!', 'success');
+ showToast('Admin password updated successfully!', 'success');
  setCurrentPassword('');
  setNewPassword('');
  setConfirmPassword('');
@@ -80,7 +80,7 @@ export const SecurityPage: React.FC<SecurityPageProps> = ({
  downloadAnchor.click();
  downloadAnchor.remove();
 
- showToast('সম্পূর্ণ ডাটাবেজ ব্যাকআপ ফাইল সফলভাবে ডাউনলোড হয়েছে!', 'success');
+ showToast('Complete database backup file downloaded successfully!', 'success');
  };
 
  const handleRestoreFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -92,12 +92,12 @@ export const SecurityPage: React.FC<SecurityPageProps> = ({
  const parsed = JSON.parse(event.target?.result as string);
  if (parsed && (parsed.clients || parsed.settings)) {
  if (onRestoreData) onRestoreData(parsed);
- showToast('সিস্টেম ব্যাকআপ ডাটা সফলভাবে রিস্টোর করা হয়েছে!', 'success');
+ showToast('System backup data restored successfully!', 'success');
  } else {
- showToast('অবৈধ ব্যাকআপ ফাইল ফরমেট!', 'error');
+ showToast('Invalid backup file format!', 'error');
  }
  } catch (err) {
- showToast('ফাইল রিড করতে ব্যর্থ হয়েছে!', 'error');
+ showToast('Failed to read backup file!', 'error');
  }
  };
  }
@@ -119,7 +119,7 @@ export const SecurityPage: React.FC<SecurityPageProps> = ({
  </span>
  </h1>
  <p className="text-xs text-slate-900 mt-0.5">
- টু-ফ্যাক্টর অথেনটিকেশন (2FA), রোল-বেসড পারমিশন, লগইন হিস্ট্রি ও ডাটাবেজ ব্যাকআপ রিস্টোর।
+ Two-Factor Authentication (2FA), role-based permissions, login history, and database backup & restore.
  </p>
  </div>
  </div>
@@ -170,7 +170,7 @@ export const SecurityPage: React.FC<SecurityPageProps> = ({
  <span>Two-Factor Authentication (2FA / OTP)</span>
  </h3>
  <p className="text-xs text-slate-800">
- অ্যাডমিন প্যানেলে লগইন করার সময় Google Authenticator বা SMS ওটিপি কোড বাধ্যতামূলক করুন।
+ Enforce Google Authenticator or SMS OTP verification when logging into the admin panel.
  </p>
 
  <div className="p-4 bg-slate-50 rounded border border-slate-200 flex items-center justify-between">
@@ -317,7 +317,7 @@ export const SecurityPage: React.FC<SecurityPageProps> = ({
  <span>Admin Login Activity &amp; Active Device Sessions</span>
  </h3>
  <button
- onClick={() => showToast('সকল রিমোট সেশন বাতিল করা হয়েছে!', 'info')}
+ onClick={() => showToast('All active remote sessions have been terminated!', 'info')}
  className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 font-bold text-xs rounded-lg border border-rose-500/30 transition-colors cursor-pointer"
  >
  Terminate All Other Sessions
@@ -358,7 +358,7 @@ export const SecurityPage: React.FC<SecurityPageProps> = ({
  <span>Download Full Database Snapshot</span>
  </h3>
  <p className="text-xs text-slate-800">
- ক্লায়েন্ট ডাটা, বিলিং হিসাব, পেমেন্ট ট্রানজেকশন ও সিস্টেম সেটিংসের একটি একক JSON ফাইল ব্যাকআপ।
+ Single-file JSON backup of client records, billing accounts, payment transactions, and system configuration.
  </p>
 
  <button
@@ -376,7 +376,7 @@ export const SecurityPage: React.FC<SecurityPageProps> = ({
  <span>Restore Database From JSON File</span>
  </h3>
  <p className="text-xs text-slate-800">
- পূর্বে ডাউনলোড করা কোনো JSON ব্যাকআপ ফাইল আপলোড করে পূর্বাবস্থায় ফিরিয়ে আনুন।
+ Restore previous state by uploading a previously downloaded JSON backup file.
  </p>
 
  <label className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-black rounded text-xs border border-slate-300 transition-colors cursor-pointer flex items-center justify-center gap-2">

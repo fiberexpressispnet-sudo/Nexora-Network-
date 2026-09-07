@@ -1,49 +1,114 @@
-import React, { useState, useEffect } from 'react';
-import { HotspotFile, AppSettings, Package, HotspotPackageRequest } from '../../types';
+import React, { useState, useEffect } from "react";
 import {
- Code,
- UploadCloud,
- Eye,
- Download,
- Send,
- FileText,
- CheckCircle2,
- Shield,
- RotateCcw,
- Sparkles,
- Wifi,
- Smartphone,
- Router,
- Zap,
-} from 'lucide-react';
-import { Modal } from '../Modal';
+  HotspotFile,
+  AppSettings,
+  Package,
+  HotspotPackageRequest,
+} from "../../types";
+import {
+  Code,
+  UploadCloud,
+  Eye,
+  Download,
+  Send,
+  FileText,
+  CheckCircle2,
+  Shield,
+  RotateCcw,
+  Sparkles,
+  Wifi,
+  Smartphone,
+  Router,
+  Zap,
+  AlertCircle,
+} from "lucide-react";
+import { Modal } from "../Modal";
 
 interface HotspotConfigProps {
- packages?: Package[];
- settings: AppSettings;
- onAddHotspotRequest?: (req: Omit<HotspotPackageRequest, 'id' | 'requestedAt' | 'status'>) => void;
- showToast: (msg: string, type: 'info' | 'success' | 'error' | 'warning') => void;
+  packages?: Package[];
+  settings: AppSettings;
+  onAddHotspotRequest?: (
+    req: Omit<HotspotPackageRequest, "id" | "requestedAt" | "status">,
+  ) => void;
+  showToast: (
+    msg: string,
+    type: "info" | "success" | "error" | "warning",
+  ) => void;
 }
 
-export const buildDynamicHotspotHtml = (packagesList: Package[], settingsObj: AppSettings) => {
- const activePkgs = packagesList.filter((p) => p.status === 'active');
- const pkgsToUse = activePkgs.length > 0 ? activePkgs : [
- { id: 1, name: '3 Mbps', price: 100, validity: '30 Days', speed: '3 Mbps', upload: '3 Mbps', deviceType: 'Mobile' },
- { id: 2, name: '5 Mbps', price: 200, validity: '30 Days', speed: '5 Mbps', upload: '5 Mbps', deviceType: 'Mobile' },
- { id: 3, name: '10 Mbps', price: 300, validity: '30 Days', speed: '10 Mbps', upload: '10 Mbps', deviceType: 'Mobile' },
- { id: 4, name: '20 Mbps', price: 500, validity: '30 Days', speed: '20 Mbps', upload: '20 Mbps', deviceType: 'Mobile' },
- { id: 5, name: '15 Mbps (Router)', price: 500, validity: '30 Days', speed: '15 Mbps', upload: '15 Mbps', deviceType: 'Router' },
- { id: 6, name: '25 Mbps', price: 800, validity: '30 Days', speed: '25 Mbps', upload: '25 Mbps', deviceType: 'Router' },
- ];
+export const buildDynamicHotspotHtml = (
+  packagesList: Package[],
+  settingsObj: AppSettings,
+) => {
+  const activePkgs = packagesList.filter((p) => p.status === "active");
+  const pkgsToUse =
+    activePkgs.length > 0
+      ? activePkgs
+      : [
+          {
+            id: 1,
+            name: "3 Mbps",
+            price: 100,
+            validity: "30 Days",
+            speed: "3 Mbps",
+            upload: "3 Mbps",
+            deviceType: "Mobile",
+          },
+          {
+            id: 2,
+            name: "5 Mbps",
+            price: 200,
+            validity: "30 Days",
+            speed: "5 Mbps",
+            upload: "5 Mbps",
+            deviceType: "Mobile",
+          },
+          {
+            id: 3,
+            name: "10 Mbps",
+            price: 300,
+            validity: "30 Days",
+            speed: "10 Mbps",
+            upload: "10 Mbps",
+            deviceType: "Mobile",
+          },
+          {
+            id: 4,
+            name: "20 Mbps",
+            price: 500,
+            validity: "30 Days",
+            speed: "20 Mbps",
+            upload: "20 Mbps",
+            deviceType: "Mobile",
+          },
+          {
+            id: 5,
+            name: "15 Mbps (Router)",
+            price: 500,
+            validity: "30 Days",
+            speed: "15 Mbps",
+            upload: "15 Mbps",
+            deviceType: "Router",
+          },
+          {
+            id: 6,
+            name: "25 Mbps",
+            price: 800,
+            validity: "30 Days",
+            speed: "25 Mbps",
+            upload: "25 Mbps",
+            deviceType: "Router",
+          },
+        ];
 
- const packagesJsonStr = JSON.stringify(pkgsToUse);
+  const packagesJsonStr = JSON.stringify(pkgsToUse);
 
- return `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="bn">
 <head>
  <meta charset="UTF-8">
  <meta name="viewport" content="width=device-width, initial-scale=1.0">
- <title>${settingsObj.appName || 'Nexora network'} — High Speed Internet</title>
+ <title>${settingsObj.appName || "Nexora network"} — High Speed Internet</title>
  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
  <style>
@@ -456,7 +521,7 @@ export const buildDynamicHotspotHtml = (packagesList: Package[], settingsObj: Ap
  <div class="header">
  <div class="logo">
  <i class="fas fa-wifi"></i>
- <span>${settingsObj.appName || 'Nexora network'}</span>
+ <span>${settingsObj.appName || "Nexora network"}</span>
  </div>
  <div class="tagline">Ultra High Speed Internet Solution</div>
  </div>
@@ -497,7 +562,7 @@ export const buildDynamicHotspotHtml = (packagesList: Package[], settingsObj: Ap
  <i class="fas fa-bullhorn"></i> Notice Board
  </div>
  <div class="notice-board">
- <p>প্যাকেজ কেনার পর সাথে সাথে ইউজার আইডি এবং পাসওয়ার্ড তৈরি হয়ে মেসেজে অথবা স্ক্রিনে দেখাবে। সমস্যা হলে যোগাযোগ করুন: <strong>${settingsObj.phone || '+880 1817 681233'}</strong></p>
+ <p>Upon purchasing a package, your User ID & Password will be generated instantly on screen and via SMS. For support, call: <strong>${settingsObj.phone || "+880 1817 681233"}</strong></p>
  </div>
  </div>
 
@@ -520,7 +585,7 @@ export const buildDynamicHotspotHtml = (packagesList: Package[], settingsObj: Ap
  <div class="step active" id="step1">
  <div class="select-group">
  <label>Full Name</label>
- <input type="text" id="custName" placeholder="আপনার নাম লিখুন">
+ <input type="text" id="custName" placeholder="Enter your full name">
  </div>
  <div class="select-group">
  <label>Phone Number (SMS Notification)</label>
@@ -575,8 +640,8 @@ export const buildDynamicHotspotHtml = (packagesList: Package[], settingsObj: Ap
  <!-- Step 2: Payment Details -->
  <div class="step" id="step2">
  <div class="instructions">
- নিচের নম্বরে <strong>Send Money</strong> করে Transaction ID লিখুন:<br>
- Merchant Number: <strong id="merchantNum" style="user-select: all; font-size: 15px; color:#38bdf8;">${settingsObj.phone || '+880 1817 681233'}</strong>
+ Send Money to the number below and enter the Transaction ID:<br>
+ Merchant Number: <strong id="merchantNum" style="user-select: all; font-size: 15px; color:#38bdf8;">${settingsObj.phone || "+880 1817 681233"}</strong>
  </div>
 
  <div class="select-group">
@@ -596,9 +661,9 @@ export const buildDynamicHotspotHtml = (packagesList: Package[], settingsObj: Ap
  <div class="step" id="step3">
  <div style="text-align: center; padding: 20px 0;">
  <i class="fas fa-check-circle" style="font-size: 50px; color: var(--secondary); margin-bottom: 15px;"></i>
- <h3 style="margin-bottom: 10px;">অর্ডার সফল হয়েছে!</h3>
+ <h3 style="margin-bottom: 10px;">Order Placed Successfully!</h3>
  <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 15px;">
- আপনার ইউজার আইডি ও পাসওয়ার্ড নিচে দেওয়া হলো। এডমিনকে নোটিফিকেশন পাঠানো হয়েছে।
+ Your User ID & Password are shown below. Admin has been notified.
  </p>
  <div style="background-color: rgba(15,23,42,0.8); padding: 15px; border-radius: 10px; text-align: left; margin-bottom: 15px;">
  <div style="font-size: 12px; color: var(--text-muted);">User ID:</div>
@@ -693,7 +758,7 @@ export const buildDynamicHotspotHtml = (packagesList: Package[], settingsObj: Ap
  const trxId = document.getElementById('trxIdInput').value.trim();
 
  if (!phone) {
- alert('অনুগ্রহ করে মোবাইল নম্বর প্রদান করুন!');
+ alert('Please enter your Mobile Number!');
  return;
  }
 
@@ -762,7 +827,7 @@ export const buildDynamicHotspotHtml = (packagesList: Package[], settingsObj: Ap
  }
  function checkAdminPass() {
  const val = document.getElementById('adminPassInput').value;
- if (val === 'isp.net' || val === '${(settingsObj as any).adminPassword || 'isp.net'}') {
+ if (val === 'isp.net' || val === '${(settingsObj as any).adminPassword || "isp.net"}') {
  alert('Admin Access Granted!');
  closeAdminModal();
  } else {
@@ -778,362 +843,405 @@ export const buildDynamicHotspotHtml = (packagesList: Package[], settingsObj: Ap
 };
 
 export const HotspotConfigPage: React.FC<HotspotConfigProps> = ({
- packages = [],
- settings,
- onAddHotspotRequest,
- showToast,
+  packages = [],
+  settings,
+  onAddHotspotRequest,
+  showToast,
 }) => {
- const [files, setFiles] = useState<HotspotFile[]>([
- { name: 'login.html', size: 14200, type: 'text/html' },
- { name: 'style.css', size: 8400, type: 'text/css' },
- { name: 'logo.png', size: 45000, type: 'image/png' },
- { name: 'script.js', size: 6200, type: 'application/javascript' },
- ]);
+  const [files, setFiles] = useState<HotspotFile[]>([
+    { name: "login.html", size: 14200, type: "text/html" },
+    { name: "style.css", size: 8400, type: "text/css" },
+    { name: "logo.png", size: 45000, type: "image/png" },
+    { name: "script.js", size: 6200, type: "application/javascript" },
+  ]);
 
- const [hotspotHtml, setHotspotHtml] = useState<string>(() => {
- const saved = localStorage.getItem('nexora_hotspot_html');
- if (saved) return saved;
- return buildDynamicHotspotHtml(packages, settings);
- });
+  const [hotspotHtml, setHotspotHtml] = useState<string>(() => {
+    const saved = localStorage.getItem("nexora_hotspot_html");
+    if (saved) return saved;
+    return buildDynamicHotspotHtml(packages, settings);
+  });
 
- const [previewOpen, setPreviewOpen] = useState(false);
- const [deploying, setDeploying] = useState(false);
- const [deploySuccess, setDeploySuccess] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [deploying, setDeploying] = useState(false);
+  const [deploySuccess, setDeploySuccess] = useState(false);
 
- const [previewUser, setPreviewUser] = useState('');
- const [previewPass, setPreviewPass] = useState('');
+  const [previewUser, setPreviewUser] = useState("");
+  const [previewPass, setPreviewPass] = useState("");
 
- useEffect(() => {
- const updatedHtml = buildDynamicHotspotHtml(packages, settings);
- setHotspotHtml(updatedHtml);
- }, [packages, settings]);
+  useEffect(() => {
+    const updatedHtml = buildDynamicHotspotHtml(packages, settings);
+    setHotspotHtml(updatedHtml);
+  }, [packages, settings]);
 
- useEffect(() => {
- const handleMessage = (event: MessageEvent) => {
- if (event.data && event.data.type === 'NEXORA_HOTSPOT_REQUEST') {
- if (onAddHotspotRequest) {
- onAddHotspotRequest(event.data.data);
- }
- }
- };
- window.addEventListener('message', handleMessage);
- return () => window.removeEventListener('message', handleMessage);
- }, [onAddHotspotRequest]);
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === "NEXORA_HOTSPOT_REQUEST") {
+        if (onAddHotspotRequest) {
+          onAddHotspotRequest(event.data.data);
+        }
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [onAddHotspotRequest]);
 
- const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
- const uploaded = e.target.files;
- if (uploaded && uploaded.length > 0) {
- const fileList = Array.from(uploaded) as File[];
- const newFiles: HotspotFile[] = fileList.map((f) => ({
- name: f.name,
- size: f.size,
- type: f.type || 'text/plain',
- }));
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploaded = e.target.files;
+    if (uploaded && uploaded.length > 0) {
+      const fileList = Array.from(uploaded) as File[];
+      const newFiles: HotspotFile[] = fileList.map((f) => ({
+        name: f.name,
+        size: f.size,
+        type: f.type || "text/plain",
+      }));
 
- // If one of the files is login.html, read its text
- const htmlFile = fileList.find((f) => f.name.endsWith('.html') || f.name.endsWith('.htm'));
- if (htmlFile) {
- const reader = new FileReader();
- reader.onload = (ev) => {
- const content = ev.target?.result as string;
- if (content) {
- setHotspotHtml(content);
- localStorage.setItem('nexora_hotspot_html', content);
- showToast(`Loaded ${htmlFile.name} content into HTML editor!`, 'success');
- }
- };
- reader.readAsText(htmlFile);
- }
+      // If one of the files is login.html, read its text
+      const htmlFile = fileList.find(
+        (f) => f.name.endsWith(".html") || f.name.endsWith(".htm"),
+      );
+      if (htmlFile) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const content = ev.target?.result as string;
+          if (content) {
+            setHotspotHtml(content);
+            localStorage.setItem("nexora_hotspot_html", content);
+            showToast(
+              `Loaded ${htmlFile.name} content into HTML editor!`,
+              "success",
+            );
+          }
+        };
+        reader.readAsText(htmlFile);
+      }
 
- setFiles((prev) => [...prev, ...newFiles]);
- showToast(`Uploaded ${newFiles.length} file(s) to hotspot template!`, 'success');
- }
- };
+      setFiles((prev) => [...prev, ...newFiles]);
+      showToast(
+        `Uploaded ${newFiles.length} file(s) to hotspot template!`,
+        "success",
+      );
+    }
+  };
 
- const handleSaveHtml = () => {
- localStorage.setItem('nexora_hotspot_html', hotspotHtml);
- showToast('Hotspot login HTML code saved locally!', 'success');
- };
+  const handleSaveHtml = () => {
+    localStorage.setItem("nexora_hotspot_html", hotspotHtml);
+    showToast("Hotspot login HTML code saved locally!", "success");
+  };
 
- const handleDeploy = () => {
- setDeploying(true);
- setDeploySuccess(false);
- showToast('Deploying hotspot files to MikroTik router /flash/hotspot...', 'info');
+  const handleDeploy = () => {
+    setDeploying(true);
+    setDeploySuccess(false);
+    showToast(
+      "Deploying hotspot files to MikroTik router /flash/hotspot...",
+      "info",
+    );
 
- setTimeout(() => {
- setDeploying(false);
- setDeploySuccess(true);
- showToast('Hotspot login page deployed successfully to MikroTik router!', 'success');
- }, 2000);
- };
+    setTimeout(() => {
+      setDeploying(false);
+      setDeploySuccess(true);
+      showToast(
+        "Hotspot login page deployed successfully to MikroTik router!",
+        "success",
+      );
+    }, 2000);
+  };
 
- const handleResetDefault = () => {
- const defaultHtml = buildDynamicHotspotHtml(packages, settings);
- setHotspotHtml(defaultHtml);
- localStorage.setItem('nexora_hotspot_html', defaultHtml);
- showToast('Reset to default Hotspot login template with live packages!', 'info');
- };
+  const handleResetDefault = () => {
+    const defaultHtml = buildDynamicHotspotHtml(packages, settings);
+    setHotspotHtml(defaultHtml);
+    localStorage.setItem("nexora_hotspot_html", defaultHtml);
+    showToast(
+      "Reset to default Hotspot login template with live packages!",
+      "info",
+    );
+  };
 
- const handleSyncPackagesToHtml = () => {
- const updated = buildDynamicHotspotHtml(packages, settings);
- setHotspotHtml(updated);
- localStorage.setItem('nexora_hotspot_html', updated);
- showToast(
- `Successfully synced ${packages.filter((p) => p.status === 'active').length} packages to Hotspot Login HTML Page!`,
- 'success'
- );
- };
+  const handleSyncPackagesToHtml = () => {
+    const updated = buildDynamicHotspotHtml(packages, settings);
+    setHotspotHtml(updated);
+    localStorage.setItem("nexora_hotspot_html", updated);
+    showToast(
+      `Successfully synced ${packages.filter((p) => p.status === "active").length} packages to Hotspot Login HTML Page!`,
+      "success",
+    );
+  };
 
- const handleDownloadBackup = () => {
- const blob = new Blob([hotspotHtml], { type: 'text/html' });
- const url = URL.createObjectURL(blob);
- const a = document.createElement('a');
- a.href = url;
- a.download = 'login.html';
- a.click();
- showToast('Downloaded hotspot login.html backup!', 'success');
- };
+  const handleDownloadBackup = () => {
+    const blob = new Blob([hotspotHtml], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "login.html";
+    a.click();
+    showToast("Downloaded hotspot login.html backup!", "success");
+  };
 
- const handleOpenWindowPreview = () => {
- const win = window.open('', '_blank');
- if (win) {
- win.document.write(hotspotHtml);
- win.document.close();
- } else {
- showToast('Please allow popups to open full window preview', 'warning');
- }
- };
+  const handleOpenWindowPreview = () => {
+    const win = window.open("", "_blank");
+    if (win) {
+      win.document.write(hotspotHtml);
+      win.document.close();
+    } else {
+      showToast("Please allow popups to open full window preview", "warning");
+    }
+  };
 
- return (
- <div className="space-y-6">
- {/* Top Action Bar */}
- <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white/70 backdrop-blur-md border border-white/40 rounded p-4 shadow-sm">
- <div>
- <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
- <Code className="w-5 h-5 text-sky-600 " /> MikroTik Hotspot Login Page
- </h3>
- <p className="text-xs text-slate-800">
- Upload or edit custom HTML templates and deploy live to your router
- </p>
- </div>
+  return (
+    <div className="space-y-6">
+      {/* Top Action Bar */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white/70 backdrop-blur-md border border-white/40 rounded p-4 shadow-sm">
+        <div>
+          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+            <Code className="w-5 h-5 text-sky-600 " /> MikroTik Hotspot Login
+            Page
+          </h3>
+          <p className="text-xs text-slate-800">
+            Upload or edit custom HTML templates and deploy live to your router
+          </p>
+        </div>
 
- <div className="flex flex-wrap items-center gap-2">
- <button
- onClick={() => setPreviewOpen(true)}
- className="px-3 py-1.5 rounded bg-teal-500 hover:bg-teal-600 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
- >
- <Eye className="w-3.5 h-3.5" /> Quick Preview
- </button>
- <button
- onClick={handleOpenWindowPreview}
- className="px-3 py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
- >
- <Eye className="w-3.5 h-3.5 text-sky-500" /> New Tab Preview
- </button>
- <button
- onClick={handleDeploy}
- disabled={deploying}
- className="px-4 py-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
- >
- <Send className="w-3.5 h-3.5" /> {deploying ? 'Deploying...' : 'Deploy to MikroTik'}
- </button>
- </div>
- </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setPreviewOpen(true)}
+            className="px-3 py-1.5 rounded bg-teal-500 hover:bg-teal-600 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+          >
+            <Eye className="w-3.5 h-3.5" /> Quick Preview
+          </button>
+          <button
+            onClick={handleOpenWindowPreview}
+            className="px-3 py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Eye className="w-3.5 h-3.5 text-sky-500" /> New Tab Preview
+          </button>
+          <button
+            onClick={handleDeploy}
+            disabled={deploying}
+            className="px-4 py-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+          >
+            <Send className="w-3.5 h-3.5" />{" "}
+            {deploying ? "Deploying..." : "Deploy to MikroTik"}
+          </button>
+        </div>
+      </div>
 
- {/* Deploy Status Alert */}
- {deploySuccess && (
- <div className="bg-emerald-500/10 border border-emerald-500/30 rounded p-4 text-xs text-emerald-600 flex items-center justify-between">
- <div className="flex items-center gap-2 font-medium">
- <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
- <span>
- <strong>Success!</strong> Hotspot login page deployed to MikroTik directory{' '}
- <code className="font-mono bg-emerald-500/20 px-1.5 py-0.5 rounded">/flash/hotspot/login.html</code>
- </span>
- </div>
- <span className="text-[10px] text-slate-800">{new Date().toLocaleTimeString()}</span>
- </div>
- )}
+      {/* Deploy Status Alert */}
+      {deploySuccess && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded p-4 text-xs text-emerald-600 flex items-center justify-between">
+          <div className="flex items-center gap-2 font-medium">
+            <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+            <span>
+              <strong>Success!</strong> Hotspot login page deployed to MikroTik
+              directory{" "}
+              <code className="font-mono bg-emerald-500/20 px-1.5 py-0.5 rounded">
+                /flash/hotspot/login.html
+              </code>
+            </span>
+          </div>
+          <span className="text-[10px] text-slate-800">
+            {new Date().toLocaleTimeString()}
+          </span>
+        </div>
+      )}
 
- {/* HTML Source Code Editor & Drag Drop Manager */}
- <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
- {/* Editor & File Upload */}
- <div className="lg:col-span-2 space-y-6">
- {/* HTML Source Editor */}
- <div className="bg-white/70 backdrop-blur-md border border-white/40 rounded p-5 shadow-sm space-y-4">
- <div className="flex justify-between items-center border-b border-slate-200/80 pb-3">
- <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
- <Code className="w-4 h-4 text-sky-500" /> Live HTML Editor ({hotspotHtml.length} chars)
- </h4>
- <div className="flex gap-2">
- <button
- onClick={handleSyncPackagesToHtml}
- className="px-3 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-xs"
- title="Sync all active packages to Hotspot Login page"
- >
- <Zap className="w-3.5 h-3.5" /> Sync Packages ({packages.filter((p) => p.status === 'active').length})
- </button>
- <button
- onClick={handleResetDefault}
- className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-900 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
- >
- <RotateCcw className="w-3 h-3" /> Reset Default
- </button>
- <button
- onClick={handleSaveHtml}
- className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-xs"
- >
- Save Code
- </button>
- </div>
- </div>
+      {/* HTML Source Code Editor & Drag Drop Manager */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Editor & File Upload */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* HTML Source Editor */}
+          <div className="bg-white/70 backdrop-blur-md border border-white/40 rounded p-5 shadow-sm space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-200/80 pb-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                <Code className="w-4 h-4 text-sky-500" /> Live HTML Editor (
+                {hotspotHtml.length} chars)
+              </h4>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSyncPackagesToHtml}
+                  className="px-3 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-xs"
+                  title="Sync all active packages to Hotspot Login page"
+                >
+                  <Zap className="w-3.5 h-3.5" /> Sync Packages (
+                  {packages.filter((p) => p.status === "active").length})
+                </button>
+                <button
+                  onClick={handleResetDefault}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-900 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" /> Reset Default
+                </button>
+                <button
+                  onClick={handleSaveHtml}
+                  className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-xs"
+                >
+                  Save Code
+                </button>
+              </div>
+            </div>
 
- <textarea
- rows={12}
- value={hotspotHtml}
- onChange={(e) => setHotspotHtml(e.target.value)}
- placeholder="Paste or edit raw HTML code here..."
- className="w-full p-3.5 rounded border border-slate-200 bg-white text-[#00a65a] font-mono text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/50 leading-relaxed"
- />
- </div>
+            <textarea
+              rows={12}
+              value={hotspotHtml}
+              onChange={(e) => setHotspotHtml(e.target.value)}
+              placeholder="Paste or edit raw HTML code here..."
+              className="w-full p-3.5 rounded border border-slate-200 bg-white text-[#00a65a] font-mono text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/50 leading-relaxed"
+            />
+          </div>
 
- {/* Drag & Drop Files */}
- <div className="bg-white/70 backdrop-blur-md border border-white/40 rounded p-5 shadow-sm space-y-4">
- <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 ">
- Template Files &amp; Assets ({files.length})
- </h4>
+          {/* Drag & Drop Files */}
+          <div className="bg-white/70 backdrop-blur-md border border-white/40 rounded p-5 shadow-sm space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 ">
+              Template Files &amp; Assets ({files.length})
+            </h4>
 
- {/* Drag and drop zone */}
- <div className="border-2 border-dashed border-slate-300 rounded p-5 text-center bg-slate-50/50 hover:border-sky-500 transition-colors relative cursor-pointer group">
- <input
- type="file"
- multiple
- onChange={handleFileUpload}
- className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
- />
- <UploadCloud className="w-8 h-8 text-sky-500 mx-auto mb-2 group-hover:scale-110 transition-transform" />
- <h4 className="text-xs font-bold text-slate-800 ">
- Drag &amp; Drop Hotspot Page Files
- </h4>
- <p className="text-[11px] text-slate-800 mt-0.5">
- Upload HTML, CSS, JavaScript, Images (PNG, JPG, SVG)
- </p>
- </div>
+            {/* Drag and drop zone */}
+            <div className="border-2 border-dashed border-slate-300 rounded p-5 text-center bg-slate-50/50 hover:border-sky-500 transition-colors relative cursor-pointer group">
+              <input
+                type="file"
+                multiple
+                onChange={handleFileUpload}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+              />
+              <UploadCloud className="w-8 h-8 text-sky-500 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+              <h4 className="text-xs font-bold text-slate-800 ">
+                Drag &amp; Drop Hotspot Page Files
+              </h4>
+              <p className="text-[11px] text-slate-800 mt-0.5">
+                Upload HTML, CSS, JavaScript, Images (PNG, JPG, SVG)
+              </p>
+            </div>
 
- {/* Uploaded Files List */}
- <div className="divide-y divide-slate-100 border border-slate-200 rounded overflow-hidden bg-white/40 ">
- {files.map((file, idx) => (
- <div
- key={idx}
- className="p-3 flex items-center justify-between text-xs hover:bg-slate-50/60 transition-colors"
- >
- <div className="flex items-center gap-2.5">
- <FileText className="w-4 h-4 text-sky-500" />
- <div>
- <span className="font-bold text-slate-800 font-mono">
- {file.name}
- </span>
- <span className="text-[10px] text-slate-800 block">
- {(file.size / 1024).toFixed(1)} KB • {file.type}
- </span>
- </div>
- </div>
- <span className="text-[10px] text-teal-600 font-semibold flex items-center gap-1">
- <CheckCircle2 className="w-3 h-3" /> Ready
- </span>
- </div>
- ))}
- </div>
- </div>
- </div>
+            {/* Uploaded Files List */}
+            <div className="divide-y divide-slate-100 border border-slate-200 rounded overflow-hidden bg-white/40 ">
+              {files.map((file, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 flex items-center justify-between text-xs hover:bg-slate-50/60 transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <FileText className="w-4 h-4 text-sky-500" />
+                    <div>
+                      <span className="font-bold text-slate-800 font-mono">
+                        {file.name}
+                      </span>
+                      <span className="text-[10px] text-slate-800 block">
+                        {(file.size / 1024).toFixed(1)} KB • {file.type}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-teal-600 font-semibold flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> Ready
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
 
- {/* Deployment Info Sidebar */}
- <div className="bg-white/70 backdrop-blur-md border border-white/40 rounded p-5 sm:p-6 shadow-sm space-y-5 flex flex-col justify-between">
- <div className="space-y-4">
- <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 border-b border-slate-200/80 pb-4">
- <Shield className="w-5 h-5 text-sky-500" /> Deployment Specification
- </h3>
+        {/* Deployment Info Sidebar */}
+        <div className="bg-white/70 backdrop-blur-md border border-white/40 rounded p-5 sm:p-6 shadow-sm space-y-5 flex flex-col justify-between">
+          <div className="space-y-4">
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 border-b border-slate-200/80 pb-4">
+              <Shield className="w-5 h-5 text-sky-500" /> Deployment
+              Specification
+            </h3>
 
- <div className="space-y-3 text-xs">
- <p className="text-slate-900 leading-relaxed">
- Hotspot files will be uploaded directly to your MikroTik router directory{' '}
- <code className="text-sky-600 font-mono font-bold">/flash/hotspot</code> via API or FTP.
- </p>
+            <div className="space-y-3 text-xs">
+              <p className="text-slate-900 leading-relaxed">
+                Hotspot files will be uploaded directly to your MikroTik router
+                directory{" "}
+                <code className="text-sky-600 font-mono font-bold">
+                  /flash/hotspot
+                </code>{" "}
+                via API or FTP.
+              </p>
 
- <div className="p-3 rounded bg-slate-50 space-y-1">
- <span className="text-[10px] font-semibold text-slate-800 uppercase">
- Target Router Directory
- </span>
- <div className="font-mono text-slate-800 font-bold">
- /flash/hotspot/login.html
- </div>
- </div>
+              <div className="p-3 rounded bg-slate-50 space-y-1">
+                <span className="text-[10px] font-semibold text-slate-800 uppercase">
+                  Target Router Directory
+                </span>
+                <div className="font-mono text-slate-800 font-bold">
+                  /flash/hotspot/login.html
+                </div>
+              </div>
 
- <div className="p-3 rounded bg-slate-50 space-y-1">
- <span className="text-[10px] font-semibold text-slate-800 uppercase">
- Login Redirect Server URL
- </span>
- <div className="font-mono text-slate-800 font-bold">
- http://192.168.1.1/login
- </div>
- </div>
+              <div className="p-3 rounded bg-slate-50 space-y-1">
+                <span className="text-[10px] font-semibold text-slate-800 uppercase">
+                  Login Redirect Server URL
+                </span>
+                <div className="font-mono text-slate-800 font-bold">
+                  http://192.168.1.1/login
+                </div>
+              </div>
 
- <div className="p-3 rounded bg-slate-50 space-y-1">
- <span className="text-[10px] font-semibold text-slate-800 uppercase">
- Hotspot Helpdesk Phone
- </span>
- <div className="font-mono text-slate-800 font-bold">
- {settings.phone}
- </div>
- </div>
- </div>
- </div>
+              <div className="p-3 rounded bg-slate-50 space-y-1">
+                <span className="text-[10px] font-semibold text-slate-800 uppercase">
+                  Hotspot Helpdesk Phone
+                </span>
+                <div className="font-mono text-slate-800 font-bold">
+                  {settings.phone}
+                </div>
+              </div>
 
- <div className="space-y-2 pt-4">
- <button
- onClick={handleDownloadBackup}
- className="w-full py-2.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
- >
- <Download className="w-4 h-4" /> Download Backup HTML
- </button>
- </div>
- </div>
- </div>
+              <div className="p-3 rounded bg-amber-50/80 border border-amber-200/50 space-y-1 mt-4">
+                <span className="text-[10px] font-bold text-amber-700 uppercase flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" /> Walled Garden Required
+                </span>
+                <p className="text-slate-800 text-[11px] leading-relaxed">
+                  For online package purchases to work before a client logs in, you MUST allow this software's domain in your MikroTik Walled Garden:
+                </p>
+                <div className="font-mono text-amber-900 font-bold bg-amber-100/50 p-1.5 rounded text-[11px] mt-1 break-all select-all">
+                  /ip hotspot walled-garden add dst-host={window.location.hostname}
+                </div>
+              </div>
+            </div>
+          </div>
 
- {/* MODAL: LIVE HOTSPOT LOGIN PREVIEW */}
- <Modal
- isOpen={previewOpen}
- title="Hotspot Login Page Live Preview"
- onClose={() => setPreviewOpen(false)}
- maxWidth="max-w-md"
- >
- <div className="space-y-4">
- <div className="border border-slate-200 rounded overflow-hidden shadow-inner bg-slate-50 p-1">
- <iframe
- srcDoc={hotspotHtml}
- title="Hotspot Live Preview"
- className="w-full h-96 rounded bg-white"
- />
- </div>
+          <div className="space-y-2 pt-4">
+            <button
+              onClick={handleDownloadBackup}
+              className="w-full py-2.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4" /> Download Backup HTML
+            </button>
+          </div>
+        </div>
+      </div>
 
- <div className="flex justify-end gap-2">
- <button
- onClick={() => setPreviewOpen(false)}
- className="px-4 py-2 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold cursor-pointer"
- >
- Close
- </button>
- <button
- onClick={() => {
- setPreviewOpen(false);
- handleDeploy();
- }}
- className="px-4 py-2 rounded bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
- >
- <Send className="w-3.5 h-3.5" /> Deploy to Router
- </button>
- </div>
- </div>
- </Modal>
- </div>
- );
+      {/* MODAL: LIVE HOTSPOT LOGIN PREVIEW */}
+      <Modal
+        isOpen={previewOpen}
+        title="Hotspot Login Page Live Preview"
+        onClose={() => setPreviewOpen(false)}
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="border border-slate-200 rounded overflow-hidden shadow-inner bg-slate-50 p-1">
+            <iframe
+              srcDoc={hotspotHtml}
+              title="Hotspot Live Preview"
+              className="w-full h-96 rounded bg-white"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setPreviewOpen(false)}
+              className="px-4 py-2 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold cursor-pointer"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => {
+                setPreviewOpen(false);
+                handleDeploy();
+              }}
+              className="px-4 py-2 rounded bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <Send className="w-3.5 h-3.5" /> Deploy to Router
+            </button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
 };

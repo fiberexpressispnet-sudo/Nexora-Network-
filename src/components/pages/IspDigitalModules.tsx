@@ -383,20 +383,20 @@ export const IspDigitalModulePage: React.FC<IspModuleProps> = ({
  <button
  type="button"
  onClick={() => {
- if (window.confirm(`আপনি কি নিশ্চিত যে "${currentModule.title}" এর সমস্ত ডাটা সম্পূর্ণ মুছে ফেলে নতুনভাবে শুরু করতে চান? (Hard Reset)`)) {
+ if (window.confirm(`Are you sure you want to reset "${currentModule.title}" data and start fresh? (Hard Reset)`)) {
  setRecords([]);
  localStorage.removeItem(`isp_module_records_${pageId}`);
  if (uid) {
  setDoc(doc(db, 'users', uid, 'appData', `isp_module_records_${pageId}`), { value: [] }).catch(console.error);
  }
- showToast(`"${currentModule.title}" এর সমস্ত ডাটা মুছে ফেলা হয়েছে।`, 'success');
+ showToast(`"${currentModule.title}" data has been reset.`, 'success');
  }
  }}
  className="px-3 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-bold rounded-lg border border-rose-500/40 flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
  title="Hard Reset: Clear all data for this module"
  >
  <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
- <span>Hard Reset (ডাটা রিসেট)</span>
+ <span>Hard Reset (Reset Data)</span>
  </button>
 
  <button

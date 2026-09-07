@@ -73,7 +73,7 @@ export const ReportsPage: React.FC<ReportsProps> = ({ clients, packages, showToa
  <button
  type="button"
  onClick={() => {
- if (window.confirm('আপনি কি নিশ্চিত যে সকল বিলিং/পেমেন্ট রিপোর্ট ডাটা মুছে ফেলতে চান? (Hard Reset)')) {
+ if (window.confirm('Are you sure you want to clear all billing & payment report data? (Hard Reset)')) {
  onHardReset();
  }
  }}
@@ -81,7 +81,7 @@ export const ReportsPage: React.FC<ReportsProps> = ({ clients, packages, showToa
  title="Clear all billing report data"
  >
  <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
- <span>Hard Reset (ডাটা রিসেট)</span>
+ <span>Hard Reset (Reset Data)</span>
  </button>
  )}
 

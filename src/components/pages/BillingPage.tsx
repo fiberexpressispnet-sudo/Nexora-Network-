@@ -123,7 +123,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  const [formItems, setFormItems] = useState<InvoiceItem[]>([
  {
  id: 'item-1',
- description: 'Monthly Internet Subscription (মাসিক ইন্টারনেট বিল)',
+ description: 'Monthly Internet Subscription',
  quantity: 1,
  unitPrice: 500,
  total: 500,
@@ -294,7 +294,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  const handleCreateInvoiceSubmit = (e: React.FormEvent) => {
  e.preventDefault();
  if (!selectedClientId) {
- showToast('অনুগ্রহ করে একজন গ্রাহক নির্বাচন করুন', 'warning');
+ showToast('Please select a subscriber', 'warning');
  return;
  }
  const client = clients.find((c) => c.id === selectedClientId);
@@ -333,7 +333,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
 
  onAddInvoice(newInvoice);
  setIsCreateModalOpen(false);
- showToast(`ইনভয়েস "${invoiceNumber}" সফলভাবে তৈরি হয়েছে!`, 'success');
+ showToast(`Invoice "${invoiceNumber}" created successfully!`, 'success');
  };
 
  // Submit Bulk Monthly Invoice Generation
@@ -352,7 +352,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  }
 
  if (targetClients.length === 0) {
- showToast('কোনো গ্রাহক পাওয়া যায়নি', 'warning');
+ showToast('No subscribers found', 'warning');
  return;
  }
 
@@ -368,7 +368,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  );
 
  if (eligibleClients.length === 0) {
- showToast(`নির্বাচিত ${bulkMonth} মাসের জন্য সকল গ্রাহকের ইনভয়েস ইতিমধ্যে তৈরি করা আছে!`, 'info');
+ showToast(`For selected ${bulkMonth} month invoices have already been generated for all subscribers!`, 'info');
  setIsBulkModalOpen(false);
  return;
  }
@@ -382,7 +382,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
 
  setIsBulkModalOpen(false);
  showToast(
- `${eligibleClients.length} জন গ্রাহকের জন্য "${bulkMonth}" মাসের ইনভয়েস স্বয়ংক্রিয়ভাবে তৈরি হয়েছে!`,
+ `${eligibleClients.length} subscribers "${bulkMonth}" month invoices created automatically!`,
  'success'
  );
  };
@@ -403,7 +403,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  e.preventDefault();
  if (!selectedInvoiceForPayment) return;
  if (paymentAmount <= 0) {
- showToast('পেমেন্টের পরিমাণ শূন্যের বেশি হতে হবে', 'warning');
+ showToast('Payment amount must be greater than zero', 'warning');
  return;
  }
 
@@ -418,14 +418,14 @@ export const BillingPage: React.FC<BillingPageProps> = ({
 
  setIsPaymentModalOpen(false);
  setSelectedInvoiceForPayment(null);
- showToast(`ইনভয়েস ${selectedInvoiceForPayment.invoiceNumber} এর জন্য ৳${paymentAmount} পেমেন্ট রেকর্ড সম্পন্ন!`, 'success');
+ showToast(`Invoice ${selectedInvoiceForPayment.invoiceNumber} for ৳${paymentAmount} payment recorded successfully!`, 'success');
  };
 
  // Open Reminder Modal
  const handleOpenReminderModal = (inv: Invoice) => {
  setSelectedInvoiceForReminder(inv);
  const amount = inv.dueAmount > 0 ? inv.dueAmount : inv.totalAmount;
- const bnText = `সম্মানিত গ্রাহক ${inv.clientName} (ID: ${inv.userId}), আপনার ${inv.billingMonth} মাসের ইন্টারনেট বিল ৳${amount} টাকা ${inv.dueDate} তারিখের মধ্যে পরিশোধ করার অনুরোধ করা হচ্ছে। বিকাশ/নগদ: ${settings.phone || '01XXXXXXXXX'}। ধন্যবাদ, ${settings.companyName || settings.appName || 'Nexora network'}`;
+ const bnText = `Dear Subscriber ${inv.clientName} (ID: ${inv.userId}), your ${inv.billingMonth} month internet bill of ৳${amount} BDT ${inv.dueDate} before the due date. bKash/Nagad: ${settings.phone || '01XXXXXXXXX'}। Thank you, ${settings.companyName || settings.appName || 'Nexora network'}`;
  const enText = `Dear ${inv.clientName} (ID: ${inv.userId}), your internet bill for ${inv.billingMonth} of Tk ${amount} is due on ${inv.dueDate}. Please pay via bKash/Nagad: ${settings.phone || '01XXXXXXXXX'}. Thank you, ${settings.companyName || settings.appName || 'Nexora network'}`;
  
  setCustomReminderText(reminderLanguage === 'bn' ? bnText : enText);
@@ -438,7 +438,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  const inv = selectedInvoiceForReminder;
  const amount = inv.dueAmount > 0 ? inv.dueAmount : inv.totalAmount;
  if (lang === 'bn') {
- setCustomReminderText(`সম্মানিত গ্রাহক ${inv.clientName} (ID: ${inv.userId}), আপনার ${inv.billingMonth} মাসের ইন্টারনেট বিল ৳${amount} টাকা ${inv.dueDate} তারিখের মধ্যে পরিশোধ করার অনুরোধ করা হচ্ছে। বিকাশ/নগদ: ${settings.phone || '01XXXXXXXXX'}। ধন্যবাদ, ${settings.companyName || settings.appName || 'Nexora network'}`);
+ setCustomReminderText(`Dear Subscriber ${inv.clientName} (ID: ${inv.userId}), your ${inv.billingMonth} month internet bill of ৳${amount} BDT ${inv.dueDate} before the due date. bKash/Nagad: ${settings.phone || '01XXXXXXXXX'}। Thank you, ${settings.companyName || settings.appName || 'Nexora network'}`);
  } else {
  setCustomReminderText(`Dear ${inv.clientName} (ID: ${inv.userId}), your internet bill for ${inv.billingMonth} of Tk ${amount} is due on ${inv.dueDate}. Please pay via bKash/Nagad: ${settings.phone || '01XXXXXXXXX'}. Thank you, ${settings.companyName || settings.appName || 'Nexora network'}`);
  }
@@ -452,7 +452,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  const encodedText = encodeURIComponent(customReminderText);
  window.open(`https://wa.me/${intlPhone}?text=${encodedText}`, '_blank');
  onSendReminder(selectedInvoiceForReminder.id, 'whatsapp');
- showToast(`WhatsApp এ রিমাইন্ডার পাঠানো হচ্ছে...`, 'info');
+ showToast(`Sending reminder via WhatsApp...`, 'info');
  };
 
  // Send SMS (Device Intent)
@@ -462,27 +462,27 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  const encodedText = encodeURIComponent(customReminderText);
  window.open(`sms:${cleanPhone}?body=${encodedText}`, '_blank');
  onSendReminder(selectedInvoiceForReminder.id, 'sms');
- showToast(`মোবাইল মেসেজে রিমাইন্ডার পাঠানো হচ্ছে...`, 'info');
+ showToast(`Sending reminder via SMS...`, 'info');
  };
 
  // Copy Reminder Text
  const handleCopyReminder = () => {
  navigator.clipboard.writeText(customReminderText);
- showToast('রিমাইন্ডার মেসেজ কপি হয়েছে!', 'success');
+ showToast('Reminder message copied!', 'success');
  };
 
  // Trigger System Gateway SMS
  const handleSendGatewaySms = () => {
  if (!selectedInvoiceForReminder) return;
  onSendReminder(selectedInvoiceForReminder.id, 'gateway');
- showToast(`সিস্টেম SMS গেটওয়ে থেকে ${selectedInvoiceForReminder.phone} নম্বরে রিমাইন্ডার পাঠানো হয়েছে!`, 'success');
+ showToast(`From system SMS gateway to ${selectedInvoiceForReminder.phone} reminder has been sent!`, 'success');
  setIsReminderModalOpen(false);
  };
 
  // Export Invoices to CSV
  const handleExportCSV = () => {
  if (invoices.length === 0) {
- showToast('কোনো ইনভয়েস ডাটা পাওয়া যায়নি', 'warning');
+ showToast('No invoice data found', 'warning');
  return;
  }
  const headers = [
@@ -538,7 +538,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  document.body.appendChild(link);
  link.click();
  document.body.removeChild(link);
- showToast(`সফলভাবে ${invoices.length} টি ইনভয়েস CSV ফাইলে ডাউনলোড করা হয়েছে!`, 'success');
+ showToast(`Successfully exported ${invoices.length} invoices to CSV!`, 'success');
  };
 
  // Print Invoice Handler
@@ -557,14 +557,14 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div>
  <div className="flex items-center gap-2.5 flex-wrap">
  <h2 className="text-xl font-black tracking-tight text-slate-800">
- Billing & Invoicing Panel (বিলিং ও ইনভয়েস)
+ Billing & Invoicing Panel
  </h2>
  <span className="bg-emerald-500/20 text-emerald-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-emerald-400/30">
  Automated ISP Billing
  </span>
  </div>
  <p className="text-xs text-slate-900 mt-1">
- গ্রাহকদের মাসিক প্যাকেজের ভিত্তিতে ইনভয়েস তৈরি, বিল স্ট্যাটাস (Paid/Pending/Overdue) মনিটরিং এবং SMS/WhatsApp পেমেন্ট রিমাইন্ডার পাঠান।
+ Generate subscriber monthly package invoices, monitor payment statuses (Paid/Pending/Overdue), and send SMS/WhatsApp payment reminders.
  </p>
  </div>
  </div>
@@ -575,7 +575,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <button
  type="button"
  onClick={() => {
- if (window.confirm('আপনি কি নিশ্চিত যে সমস্ত ইনভয়েস ও বিলিং রেকর্ড মুছে ফেলে নতুনভাবে শুরু করতে চান?')) {
+ if (window.confirm('Are you sure you want to clear all invoice and billing records? (Hard Reset)')) {
  onHardReset();
  }
  }}
@@ -634,13 +634,13 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div className="flex items-center justify-between">
  <div>
  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-800 ">
- Total Invoiced (মোট বিল)
+ Total Invoiced
  </p>
  <h3 className="text-2xl font-black text-slate-900 mt-1">
  ৳{stats.totalAmount.toLocaleString()}
  </h3>
  <p className="text-[11px] text-slate-800 mt-0.5">
- {stats.totalCount} টি মোট ইনভয়েস
+ {stats.totalCount} Invoices total invoices
  </p>
  </div>
  <div className="w-11 h-11 rounded bg-sky-50 text-sky-600 flex items-center justify-center font-bold">
@@ -655,7 +655,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div>
  <div className="flex items-center gap-2">
  <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 ">
- Paid / Collected (আদায়কৃত)
+ Paid / Collected
  </p>
  <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 ">
  {stats.collectionRate}%
@@ -665,7 +665,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  ৳{stats.paidAmount.toLocaleString()}
  </h3>
  <p className="text-[11px] text-slate-800 mt-0.5">
- {stats.paidCount} টি পরিশোধিত
+ {stats.paidCount} Paid
  </p>
  </div>
  <div className="w-11 h-11 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
@@ -686,13 +686,13 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div className="flex items-center justify-between">
  <div>
  <p className="text-[11px] font-bold uppercase tracking-wider text-amber-600 ">
- Pending Bills (চলতি বকেয়া)
+ Pending Bills (Current Due)
  </p>
  <h3 className="text-2xl font-black text-amber-600 mt-1">
  ৳{stats.pendingAmount.toLocaleString()}
  </h3>
  <p className="text-[11px] text-slate-800 mt-0.5">
- {stats.pendingCount} টি অপেক্ষমান ইনভয়েস
+ {stats.pendingCount} pending invoices
  </p>
  </div>
  <div className="w-11 h-11 rounded bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
@@ -707,7 +707,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div>
  <div className="flex items-center gap-1.5">
  <p className="text-[11px] font-bold uppercase tracking-wider text-rose-600 ">
- Overdue Bills (মেয়াদোত্তীর্ণ)
+ Overdue Bills (Expired)
  </p>
  {stats.overdueCount > 0 && (
  <span className="animate-pulse w-2 h-2 rounded-full bg-rose-500" />
@@ -717,7 +717,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  ৳{stats.overdueAmount.toLocaleString()}
  </h3>
  <p className="text-[11px] text-slate-800 mt-0.5">
- {stats.overdueCount} টি বিলের তারিখ পার হয়েছে
+ {stats.overdueCount} overdue bills past due date
  </p>
  </div>
  <div className="w-11 h-11 rounded bg-rose-50 text-rose-600 flex items-center justify-center font-bold">
@@ -736,7 +736,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  type="text"
  value={searchQuery}
  onChange={(e) => setSearchQuery(e.target.value)}
- placeholder="ইনভয়েস নম্বর, ক্লায়েন্টের নাম, ইউজার আইডি বা মোবাইল..."
+ placeholder="Invoice No, Client Name, User ID or Phone..."
  className="w-full pl-9.5 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#3c8dbc]"
  />
  {searchQuery && (
@@ -805,7 +805,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  onChange={(e) => setMonthFilter(e.target.value)}
  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:border-[#3c8dbc]"
  >
- <option value="all">All Months (সকল মাস)</option>
+ <option value="all">All Months</option>
  {availableMonths.map((m) => (
  <option key={m} value={m}>
  {m}
@@ -838,7 +838,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div className="flex items-center gap-2">
  <FileText className="w-4 h-4 text-sky-500" />
  <h3 className="text-sm font-extrabold text-slate-900 ">
- Invoice Ledger ({filteredInvoices.length} টি ইনভয়েস)
+ Invoice Ledger ({filteredInvoices.length} Invoices)
  </h3>
  </div>
  <div className="text-xs text-slate-800 font-semibold">
@@ -850,10 +850,10 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div className="p-12 text-center text-slate-800 ">
  <Receipt className="w-12 h-12 mx-auto text-slate-900 mb-3" />
  <p className="text-sm font-bold text-slate-700 ">
- কোনো ইনভয়েস পাওয়া যায়নি
+ No invoices found
  </p>
  <p className="text-xs text-slate-800 mt-1 max-w-sm mx-auto">
- নতুন ইনভয়েস তৈরি করতে ওপরের &quot;Create Custom Invoice&quot; অথবা &quot;Bulk Monthly Invoices&quot; বাটনে ক্লিক করুন।
+ To generate an invoice, click &quot;Create Custom Invoice&quot; or &quot;Bulk Monthly Invoices&quot; above.
  </p>
  <div className="flex items-center justify-center gap-3 mt-4">
  <button
@@ -1023,9 +1023,9 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  {/* Delete Invoice */}
  <button
  onClick={() => {
- if (window.confirm(`আপনি কি নিশ্চিত যে ইনভয়েস "${inv.invoiceNumber}" মুছে ফেলতে চান?`)) {
+ if (window.confirm(`Are you sure you want to delete Invoice "${inv.invoiceNumber}" delete?`)) {
  onDeleteInvoice(inv.id);
- showToast(`ইনভয়েস ${inv.invoiceNumber} মুছে ফেলা হয়েছে`, 'info');
+ showToast(`Invoice ${inv.invoiceNumber} deleted successfully`, 'info');
  }
  }}
  className="p-1.5 text-slate-800 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-all cursor-pointer"
@@ -1057,8 +1057,8 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <Plus className="w-5 h-5" />
  </div>
  <div>
- <h3 className="text-base font-extrabold">Create Custom Invoice (নতুন ইনভয়েস)</h3>
- <p className="text-xs text-slate-800">নির্দিষ্ট গ্রাহকের জন্য কাস্টম বিল তৈরি করুন</p>
+ <h3 className="text-base font-extrabold">Create Custom Invoice</h3>
+ <p className="text-xs text-slate-800">Create custom invoice for specific subscriber</p>
  </div>
  </div>
  <button
@@ -1074,7 +1074,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  {/* Client Selection */}
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Select Client (গ্রাহক নির্বাচন করুন) *
+ Select Subscriber *
  </label>
  <select
  value={selectedClientId}
@@ -1095,7 +1095,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Billing Month (বিলের মাস) *
+ Billing Month *
  </label>
  <input
  type="month"
@@ -1107,7 +1107,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  </div>
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Issue Date (ইস্যু তারিখ) *
+ Issue Date *
  </label>
  <input
  type="date"
@@ -1119,7 +1119,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  </div>
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Due Date (পরিশোধের শেষ তারিখ) *
+ Due Date *
  </label>
  <input
  type="date"
@@ -1135,7 +1135,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div className="border border-slate-200 rounded p-3 bg-slate-50 ">
  <div className="flex items-center justify-between mb-2">
  <span className="font-extrabold text-slate-800 ">
- Bill Items Breakdown (আইটেম বিবরণী)
+ Bill Items Breakdown
  </span>
  <button
  type="button"
@@ -1198,7 +1198,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  Subtotal: ৳{formItems.reduce((s, i) => s + i.total, 0)}
  </div>
  <div className="flex items-center justify-end gap-2">
- <span className="text-slate-900 ">Discount (ছাড় ৳):</span>
+ <span className="text-slate-900 ">Discount (৳):</span>
  <input
  type="number"
  min="0"
@@ -1208,7 +1208,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  />
  </div>
  <div className="flex items-center justify-end gap-2">
- <span className="text-slate-900 ">Tax / VAT (ভ্যাট ৳):</span>
+ <span className="text-slate-900 ">Tax / VAT (৳):</span>
  <input
  type="number"
  min="0"
@@ -1218,7 +1218,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  />
  </div>
  <div className="text-sm font-black text-slate-900 pt-1">
- Net Total (মোট প্রদেয়): ৳
+ Net Total (Total Payable): ৳
  {Math.max(
  0,
  formItems.reduce((s, i) => s + i.total, 0) - formDiscount + formTax
@@ -1230,7 +1230,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  {/* Notes */}
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Notes / Payment Terms (বিল সংক্রান্ত নির্দেশনা)
+ Notes / Payment Terms
  </label>
  <input
  type="text"
@@ -1275,7 +1275,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  </div>
  <div>
  <h3 className="text-base font-extrabold">Bulk Invoice Generator</h3>
- <p className="text-xs text-emerald-300/80">এক ক্লিকে সকল গ্রাহকের জন্য মাসিক বিল তৈরি</p>
+ <p className="text-xs text-emerald-300/80">Generate monthly bills for all subscribers with 1 click</p>
  </div>
  </div>
  <button
@@ -1289,7 +1289,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <form onSubmit={handleBulkGenerateSubmit} className="p-5 space-y-4 text-xs">
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Billing Month (কোন মাসের জন্য বিল তৈরি করবেন?) *
+ Billing Month *
  </label>
  <input
  type="month"
@@ -1303,7 +1303,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div className="grid grid-cols-2 gap-3">
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Issue Date (ইস্যু তারিখ) *
+ Issue Date *
  </label>
  <input
  type="date"
@@ -1315,7 +1315,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  </div>
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Due Date (লাস্ট ডেট) *
+ Due Date *
  </label>
  <input
  type="date"
@@ -1329,14 +1329,14 @@ export const BillingPage: React.FC<BillingPageProps> = ({
 
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Target Router Node (নির্দিষ্ট রাউটার নোড)
+ Target Router Node
  </label>
  <select
  value={bulkRouterTarget}
  onChange={(e) => setBulkRouterTarget(e.target.value)}
  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-900 font-semibold focus:outline-none focus:border-emerald-500"
  >
- <option value="all">All Routers (সকল রাউটারের গ্রাহক)</option>
+ <option value="all">All Routers</option>
  {routers.map((r) => (
  <option key={r.id} value={r.name}>
  {r.name} ({r.ip})
@@ -1347,20 +1347,20 @@ export const BillingPage: React.FC<BillingPageProps> = ({
 
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Client Status Target (গ্রাহকের স্ট্যাটাস ফিল্টার)
+ Client Status Filter
  </label>
  <select
  value={bulkClientSelection}
  onChange={(e) => setBulkClientSelection(e.target.value as 'all' | 'online_only')}
  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-900 font-semibold focus:outline-none focus:border-emerald-500"
  >
- <option value="all">All Active / Registered Clients (সকল ক্লায়েন্ট)</option>
- <option value="online_only">Online Active Clients Only (শুধুমাত্র অনলাইন ক্লায়েন্ট)</option>
+ <option value="all">All Active / Registered Clients</option>
+ <option value="online_only">Online Active Clients Only</option>
  </select>
  </div>
 
  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded text-emerald-800 text-[11px] leading-relaxed">
- ℹ️ সিস্টেম প্রতিটি ক্লায়েন্টের প্যাকেজের নির্ধারিত রেট (Custom Client Price বা Package Base Price) হিসাব করে স্বয়ংক্রিয়ভাবে ডুপ্লিকেট বাদ দিয়ে ইনভয়েস তৈরি করবে।
+ ℹ️ The system calculates rate per subscriber automatically (Custom Price or Package Base Price) and generates unique non-duplicate invoices.
  </div>
 
  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 ">
@@ -1395,7 +1395,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <CreditCard className="w-5 h-5" />
  </div>
  <div>
- <h3 className="text-base font-extrabold">Receive Bill Payment (বিল গ্রহণ)</h3>
+ <h3 className="text-base font-extrabold">Receive Bill Payment</h3>
  <p className="text-xs text-emerald-300/80">
  Invoice: {selectedInvoiceForPayment.invoiceNumber}
  </p>
@@ -1431,7 +1431,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  {/* Payment Amount */}
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Received Amount (গৃহীত টাকার পরিমাণ ৳) *
+ Received Amount (৳) *
  </label>
  <input
  type="number"
@@ -1447,7 +1447,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  {/* Payment Method */}
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Payment Method (পেমেন্টের মাধ্যম) *
+ Payment Method *
  </label>
  <div className="grid grid-cols-5 gap-2">
  {(['bKash', 'Nagad', 'Rocket', 'Cash', 'Bank'] as const).map((method) => {
@@ -1478,7 +1478,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  {/* Transaction ID */}
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Transaction ID / TrxID (ঐচ্ছিক ট্রানজেকশন নম্বর)
+ Transaction ID / TrxID (Optional)
  </label>
  <input
  type="text"
@@ -1492,7 +1492,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  {/* Collector */}
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Bill Collector (বিল আদায়কারী)
+ Bill Collector
  </label>
  <input
  type="text"
@@ -1511,7 +1511,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  className="w-4 h-4 text-emerald-600 rounded"
  />
  <span className="text-slate-800 font-bold text-xs">
- গ্রাহকের ইন্টারনেট মেয়াদ স্বয়ংক্রিয়ভাবে ১ মাস (৩০ দিন) বৃদ্ধি করুন
+ Extend subscriber internet validity automatically by 1 month (30 days)
  </span>
  </label>
 
@@ -1549,7 +1549,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <Send className="w-5 h-5" />
  </div>
  <div>
- <h3 className="text-base font-extrabold">Send Payment Reminder (পেমেন্ট রিমাইন্ডার)</h3>
+ <h3 className="text-base font-extrabold">Send Payment Reminder</h3>
  <p className="text-xs text-amber-300/80">
  To: {selectedInvoiceForReminder.clientName} ({selectedInvoiceForReminder.phone})
  </p>
@@ -1577,7 +1577,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  : 'text-slate-800 '
  }`}
  >
- বাংলা (Bangla)
+ Bangla
  </button>
  <button
  type="button"
@@ -1596,7 +1596,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  {/* Editable SMS Preview */}
  <div>
  <label className="block font-bold text-slate-700 mb-1">
- Message Text (মেসেজের বিবরণী)
+ Message Text
  </label>
  <textarea
  rows={4}
@@ -1668,9 +1668,9 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <Bell className="w-5 h-5" />
  </div>
  <div>
- <h3 className="text-base font-extrabold">Bulk Reminders (একসাথে সকল বকেয়া রিমাইন্ডার)</h3>
+ <h3 className="text-base font-extrabold">Bulk Due Reminders</h3>
  <p className="text-xs text-amber-300/80">
- {stats.pendingCount + stats.overdueCount} জন গ্রাহকের বকেয়া বিল রিমাইন্ডার
+ {stats.pendingCount + stats.overdueCount} Subscribers Due Bill Reminders
  </p>
  </div>
  </div>
@@ -1684,13 +1684,13 @@ export const BillingPage: React.FC<BillingPageProps> = ({
 
  <div className="p-5 space-y-4 text-xs">
  <p className="text-slate-900 leading-relaxed">
- আপনি কি এক ক্লিকে সকল অপেক্ষমান (Pending) এবং মেয়াদোত্তীর্ণ (Overdue) <strong>{stats.pendingCount + stats.overdueCount}</strong> টি ইনভয়েসের জন্য গ্রাহকদের মোবাইল নম্বরে পেমেন্ট রিমাইন্ডার পাঠাতে চান?
+ Are you sure you want to dispatch SMS payment reminders to all pending & overdue <strong>{stats.pendingCount + stats.overdueCount}</strong> invoices to subscriber mobile numbers?
  </p>
 
  <div className="p-3 bg-amber-50 border border-amber-200 rounded space-y-1 text-[11px] text-amber-800 ">
- <div>• মোট বকেয়া অ্যামাউন্ট: <strong>৳{(stats.pendingAmount + stats.overdueAmount).toLocaleString()}</strong></div>
- <div>• ওভারডিউ ইনভয়েস: <strong>{stats.overdueCount}</strong> টি</div>
- <div>• পেন্ডিং ইনভয়েস: <strong>{stats.pendingCount}</strong> টি</div>
+ <div>• Total Due Amount: <strong>৳{(stats.pendingAmount + stats.overdueAmount).toLocaleString()}</strong></div>
+ <div>• Overdue Invoices: <strong>{stats.overdueCount}</strong> Invoices</div>
+ <div>• Pending Invoices: <strong>{stats.pendingCount}</strong> Invoices</div>
  </div>
 
  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 ">
@@ -1707,7 +1707,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  const targets = evaluatedInvoices.filter((i) => i.status === 'pending' || i.status === 'overdue');
  targets.forEach((t) => onSendReminder(t.id, 'gateway'));
  setIsBulkReminderModalOpen(false);
- showToast(`${targets.length} জন বকেয়া গ্রাহককে SMS রিমাইন্ডার কিউতে পাঠানো হয়েছে!`, 'success');
+ showToast(`${targets.length} due subscribers queued for SMS reminder!`, 'success');
  }}
  className="px-5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:brightness-110 text-white font-bold rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer"
  >
@@ -1809,11 +1809,11 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div className="mt-2">
  {selectedInvoiceForView.status === 'paid' ? (
  <span className="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded font-black text-xs uppercase tracking-wider">
- PAID (পরিশোধিত)
+ PAID (Paid)
  </span>
  ) : selectedInvoiceForView.status === 'overdue' ? (
  <span className="inline-block px-3 py-1 bg-rose-100 text-rose-800 border border-rose-300 rounded font-black text-xs uppercase tracking-wider">
- OVERDUE (বকেয়া)
+ OVERDUE (Due)
  </span>
  ) : (
  <span className="inline-block px-3 py-1 bg-amber-100 text-amber-800 border border-amber-300 rounded font-black text-xs uppercase tracking-wider">
@@ -1828,7 +1828,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  <div className="grid grid-cols-2 gap-6 bg-slate-50 p-4 rounded border border-slate-100 text-xs">
  <div>
  <div className="font-bold text-slate-800 uppercase text-[10px] tracking-wider mb-1">
- Billed To (গ্রাহকের বিবরণী):
+ Billed To (Subscriber Details):
  </div>
  <div className="font-extrabold text-sm text-slate-900">{selectedInvoiceForView.clientName}</div>
  <div className="text-slate-700 font-semibold mt-0.5">User ID: {selectedInvoiceForView.userId}</div>
@@ -1893,7 +1893,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
  />
  </div>
  <div className="text-[11px] text-slate-900">
- <div className="font-bold text-slate-800">Scan & Pay (বিকাশ / নগদ)</div>
+ <div className="font-bold text-slate-800">Scan & Pay (bKash / Nagad)</div>
  <div>Merchant: {settings.phone || '01XXXXXXXXX'}</div>
  <div className="text-[10px] text-slate-800">Ref: {selectedInvoiceForView.userId}</div>
  </div>

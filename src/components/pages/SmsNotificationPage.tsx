@@ -85,7 +85,7 @@ export const SmsNotificationPage: React.FC<SmsNotificationPageProps> = ({
  // Broadcast Composer
  const [broadcastTarget, setBroadcastTarget] = useState<'all' | 'due' | 'expired' | 'online'>('due');
  const [customMessage, setCustomMessage] = useState(
- 'সম্মানিত গ্রাহক, আপনার Nexora network ইন্টারনেট বিল বকেয়া রয়েছে। নিরবচ্ছিন্ন সেবার জন্য দ্রুত বিল পরিশোধ করুন। ধন্যবাদ।'
+ 'Dear subscriber, your Nexora network internet bill is due. Please pay promptly to enjoy uninterrupted service. Thank you.'
  );
  const [logs, setLogs] = useState<SmsLogItem[]>(() => {
  try {
@@ -109,11 +109,11 @@ export const SmsNotificationPage: React.FC<SmsNotificationPageProps> = ({
 
  const handleSendBroadcast = () => {
  if (!customMessage.trim()) {
- showToast('অনুগ্রহ করে মেসেজ লিখুন।', 'error');
+ showToast('Please enter a message text.', 'error');
  return;
  }
  if (recipients.length === 0) {
- showToast('নির্বাচিত ক্যাটাগরিতে কোনো গ্রাহক নেই।', 'error');
+ showToast('No subscribers found in the selected category.', 'error');
  return;
  }
 
@@ -137,7 +137,7 @@ export const SmsNotificationPage: React.FC<SmsNotificationPageProps> = ({
  }));
 
  showToast(
- `সফলভাবে ${recipients.length} জন গ্রাহককে বাল্ক SMS পাঠানো হয়েছে! (Sender: ${gatewayConfig.senderId})`,
+ `Successfully dispatched bulk SMS to ${recipients.length} subscribers! (Sender: ${gatewayConfig.senderId})`,
  'success'
  );
  };
@@ -158,7 +158,7 @@ export const SmsNotificationPage: React.FC<SmsNotificationPageProps> = ({
  </span>
  </h1>
  <p className="text-xs text-slate-900 mt-0.5">
- অটোমেটিক বিলিং SMS, মেয়াদোত্তীর্ণ সতর্কতা, হোয়াটসঅ্যাপ ডিরেক্ট মেসেজ ও বাল্ক নোটিফিকেশন ইঞ্জিন।
+ Automated billing SMS, expiry alerts, WhatsApp direct messaging, and bulk notification engine.
  </p>
  </div>
  </div>
@@ -290,17 +290,17 @@ export const SmsNotificationPage: React.FC<SmsNotificationPageProps> = ({
  <span>Direct WhatsApp Messenger Integration</span>
  </h3>
  <p className="text-xs text-slate-800">
- যেকোনো ক্লায়েন্টকে সরাসরি WhatsApp Web বা অ্যাপের মাধ্যমে কাস্টম নোটিফিকেশন পাঠাতে পারবেন।
+ Send custom notifications directly to any client via WhatsApp Web or mobile app.
  </p>
 
  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
- {clients.slice(0, 5).map((client) => {
+ {clients.slice(0, 5).map((client, idx) => {
  const waUrl = `https://wa.me/88${client.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
- `সম্মানিত ${client.name}, আপনার Nexora network ইন্টারনেট সংযোগের বিষয়ে জরুরি বার্তা।`
+ `Dear ${client.name}, important update regarding your Nexora network internet service.`
  )}`;
  return (
  <div
- key={client.id}
+ key={client.id ? `${client.id}-${idx}` : idx}
  className="p-3 bg-slate-50 border border-slate-100 rounded flex items-center justify-between text-xs"
  >
  <div>
@@ -331,20 +331,20 @@ export const SmsNotificationPage: React.FC<SmsNotificationPageProps> = ({
  <span>Automatic Instant SMS Event Triggers</span>
  </h3>
  <p className="text-xs text-slate-800">
- নিচের ইভেন্টগুলো ঘটলে সিস্টেম নিজে থেকেই তাৎক্ষণিকভাবে সংশ্লিষ্ট গ্রাহককে SMS অ্যালার্ট পাঠাবে।
+ When the following events occur, the system will automatically send instant SMS alerts to the subscriber.
  </p>
 
  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
  {[
- { id: 'billGenerated', title: 'Monthly Bill Generated', desc: 'প্রতি মাসের ১ তারিখে নতুন ইনভয়েস ইস্যু হলে গ্রাহককে মোট বিল জানানো।' },
- { id: 'paymentReceived', title: 'Payment Received (Receipt)', desc: 'বিকাশ/নগদ/ক্যাশে টাকা জমা হলে ট্রানজেকশন আইডিসহ ডিজিটাল মানি রিসিট।' },
- { id: 'paymentDue', title: 'Payment Due Warning (3 Days Before)', desc: 'বিল পরিশোধের শেষ তারিখের ৩ দিন আগে মৃদু সতর্কবার্তা প্রেরণ।' },
- { id: 'paymentOverdue', title: 'Payment Overdue Alert', desc: 'মেয়াদ শেষ হওয়ার পর বকেয়া নোটিশ ও সংযোগ বন্ধের আগাম সতর্কতা।' },
- { id: 'packageExpiring', title: 'Package Expiring in 24 Hours', desc: 'প্যাকেজের ২৪ ঘণ্টা মেয়াদ বাকি থাকলে অটো-রিমাইন্ডার।' },
- { id: 'packageRenewed', title: 'Package Successfully Renewed', desc: 'প্যাকেজ রিনিউ ও নতুন ভ্যালিডিটি ডেট কনফার্মেশন SMS।' },
- { id: 'connectionSuspended', title: 'Connection Suspended Notice', desc: 'অনাদায়ী বিলের জন্য লাইন সাময়িক বন্ধ হলে কারণসহ বার্তা।' },
- { id: 'connectionActivated', title: 'Connection Unblocked / Activated', desc: 'পেমেন্টের পর মাইক্রোটিকে লাইন আনব্লক হওয়ার তাৎক্ষণিক সুখবর।' },
- { id: 'complaintUpdated', title: 'Support Ticket Status Update', desc: 'গ্রাহকের অভিযোগ টিকেট সমাধান হলে টেকনিশিয়ানের রিপোর্ট SMS।' },
+ { id: 'billGenerated', title: 'Monthly Bill Generated', desc: 'Notify subscriber of total due when monthly invoice is generated on the 1st of each month.' },
+ { id: 'paymentReceived', title: 'Payment Received (Receipt)', desc: 'Instant digital money receipt with transaction ID upon receiving payment via bKash/Nagad/Cash.' },
+ { id: 'paymentDue', title: 'Payment Due Warning (3 Days Before)', desc: 'Gentle payment reminder sent 3 days before the invoice due date.' },
+ { id: 'paymentOverdue', title: 'Payment Overdue Alert', desc: 'Urgent overdue notice and prior warning before line disconnection.' },
+ { id: 'packageExpiring', title: 'Package Expiring in 24 Hours', desc: 'Automated alert when only 24 hours remain on the package.' },
+ { id: 'packageRenewed', title: 'Package Successfully Renewed', desc: 'Confirmation SMS upon renewal with new validity date.' },
+ { id: 'connectionSuspended', title: 'Connection Suspended Notice', desc: 'Notification with reason when connection is temporarily suspended for unpaid dues.' },
+ { id: 'connectionActivated', title: 'Connection Unblocked / Activated', desc: 'Instant alert when connection is unblocked in MikroTik following payment.' },
+ { id: 'complaintUpdated', title: 'Support Ticket Status Update', desc: 'Resolution SMS with technician report when a customer complaint is resolved.' },
  ].map((item) => {
  const isEnabled = triggers[item.id as keyof typeof triggers];
  return (

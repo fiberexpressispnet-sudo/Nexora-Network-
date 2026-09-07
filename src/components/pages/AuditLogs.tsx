@@ -20,7 +20,7 @@ export const AuditLogsPage: React.FC<AuditLogsProps> = ({ logs, onHardReset }) =
  <button
  type="button"
  onClick={() => {
- if (window.confirm('আপনি কি নিশ্চিত যে সমস্ত সিস্টেম অডিট লগ মুছে ফেলতে চান? (Hard Reset)')) {
+ if (window.confirm('Are you sure you want to clear all system audit logs? (Hard Reset)')) {
  onHardReset();
  }
  }}
@@ -28,7 +28,7 @@ export const AuditLogsPage: React.FC<AuditLogsProps> = ({ logs, onHardReset }) =
  title="Clear all audit logs"
  >
  <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
- <span>Hard Reset (ডাটা রিসেট)</span>
+ <span>Hard Reset (Reset Data)</span>
  </button>
  )}
  <span className="text-xs text-slate-800 font-mono">{logs.length} Total Events</span>

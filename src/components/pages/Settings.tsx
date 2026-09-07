@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { AppSettings } from '../../types';
-import { Settings, Save, Upload, Image, Phone, MessageSquare, Shield, Building, Trash2, RotateCcw, Lock, KeyRound, ShieldCheck, Fingerprint } from 'lucide-react';
+import { Settings, Save, Upload, Image, Phone, MessageSquare, Shield, Building, Trash2, RotateCcw, Lock, KeyRound, ShieldCheck, Fingerprint, Key } from 'lucide-react';
 import { compressImage } from '../../lib/imageUtils';
-import { PatternLockSettingsModal } from '../PatternLockSettingsModal';
+import { PinLockSettingsModal } from '../PinLockSettingsModal';
 
 interface SettingsProps {
  settings: AppSettings;
@@ -28,9 +28,9 @@ export const SettingsPage: React.FC<SettingsProps> = ({
  const [currency, setCurrency] = useState(settings.currency);
  const [sessionTimeout, setSessionTimeout] = useState(settings.sessionTimeout);
  const [twoFactor, setTwoFactor] = useState(settings.twoFactor);
- const [patternLockEnabled, setPatternLockEnabled] = useState<boolean>(settings.patternLockEnabled !== false);
+ const [pinLockEnabled, setPinLockEnabled] = useState<boolean>(settings.pinLockEnabled !== false && settings.patternLockEnabled !== false);
  const [recoveryPin, setRecoveryPin] = useState<string>(settings.recoveryPin || '1234');
- const [isPatternModalOpen, setIsPatternModalOpen] = useState(false);
+ const [isPinModalOpen, setIsPinModalOpen] = useState(false);
  const [paymentLogos, setPaymentLogos] = useState(settings.paymentLogos || {});
 
  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,7 +101,10 @@ export const SettingsPage: React.FC<SettingsProps> = ({
  currency,
  sessionTimeout: Number(sessionTimeout),
  twoFactor,
- patternLockEnabled,
+ pinLockEnabled,
+ pinCode: settings.pinCode || settings.pinPassword || '1234',
+ pinPassword: settings.pinCode || settings.pinPassword || '1234',
+ patternLockEnabled: pinLockEnabled,
  patternSequence: settings.patternSequence || [0, 1, 2, 5, 8],
  recoveryPin: recoveryPin.trim() || '1234',
  autoLockMinutes: settings.autoLockMinutes || 0,
@@ -112,12 +115,12 @@ export const SettingsPage: React.FC<SettingsProps> = ({
  showToast('System settings and branding updated!', 'success');
  };
 
- const handleSavePatternConfig = (newVals: Partial<AppSettings>) => {
+ const handleSavePinConfig = (newVals: Partial<AppSettings>) => {
  const updated: AppSettings = {
  ...settings,
  ...newVals,
  };
- if (newVals.patternLockEnabled !== undefined) setPatternLockEnabled(newVals.patternLockEnabled);
+ if (newVals.pinLockEnabled !== undefined) setPinLockEnabled(newVals.pinLockEnabled);
  if (newVals.recoveryPin !== undefined) setRecoveryPin(newVals.recoveryPin);
  onSaveSettings(updated);
  };
@@ -319,37 +322,37 @@ export const SettingsPage: React.FC<SettingsProps> = ({
  </div>
  </div>
 
- {/* App Security & Pattern Lock Configuration */}
+ {/* App Security & PIN Lock Configuration */}
  <div className="bg-white/70 backdrop-blur-md border border-white/40 rounded p-5 sm:p-6 shadow-sm space-y-5">
  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
- <Lock className="w-5 h-5 text-sky-600 " /> অ্যাপ প্যাটার্ন লক ও নিরাপত্তা (Pattern Lock Security)
+ <Lock className="w-5 h-5 text-sky-600 " /> PIN Code & Password Security (PIN &amp; Password Lock)
  </h3>
  <span
  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
- patternLockEnabled
+ pinLockEnabled
  ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
  : 'bg-slate-100 text-slate-800 border border-slate-200 '
  }`}
  >
- <Fingerprint className="w-3.5 h-3.5" />
- <span>{patternLockEnabled ? 'বায়োমেট্রিক ও প্যাটার্ন লক সক্রিয়' : 'লক নিষ্ক্রিয়'}</span>
+ <KeyRound className="w-3.5 h-3.5" />
+ <span>{pinLockEnabled ? 'PIN Lock Enabled' : 'PIN Lock Disabled'}</span>
  </span>
  </div>
 
  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
  <div className="space-y-4">
  <p className="text-xs text-slate-900 leading-relaxed">
- যেকোনো মোবাইল বা ব্রাউজার থেকে অ্যাপ ওপেন করার সাথে সাথে কোনো গুগল লগইন পেজ না দেখিয়ে সরাসরি আসল ডিভাইসের <strong>ফিঙ্গারপ্রিন্ট সেন্সর</strong> অথবা সুরক্ষিত ৩x৩ প্যাটার্ন লক চাইবে। আপনার আসল আঙুলের ছাপ বা সেট করা প্যাটার্ন দিয়ে শুধুমাত্র আপনিই সিস্টেমে প্রবেশ করতে পারবেন।
+ Whenever the app is opened from any mobile or browser, it will prompt for the 4-8 digit <strong>Admin Security PIN</strong>. Only you can enter the system with your configured PIN.
  </p>
 
  <div className="flex flex-wrap gap-3">
  <button
  type="button"
- onClick={() => setIsPatternModalOpen(true)}
+ onClick={() => setIsPinModalOpen(true)}
  className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded text-xs font-bold flex items-center gap-2 shadow transition-all cursor-pointer"
  >
- <Fingerprint className="w-4 h-4" /> বায়োমেট্রিক ও প্যাটার্ন কনফিগারেশন
+ <KeyRound className="w-4 h-4" /> PIN Code & Security Configuration
  </button>
  </div>
  </div>
@@ -357,26 +360,26 @@ export const SettingsPage: React.FC<SettingsProps> = ({
  <div className="p-4 rounded bg-slate-50/70 border border-slate-200 space-y-3">
  <div className="flex items-center justify-between">
  <span className="text-xs font-bold text-slate-700 ">
- অ্যাপ স্টার্টআপে নিরাপত্তা লক আবশ্যক
+ PIN lock required on app startup
  </span>
  <input
  type="checkbox"
- checked={patternLockEnabled}
- onChange={(e) => setPatternLockEnabled(e.target.checked)}
+ checked={pinLockEnabled}
+ onChange={(e) => setPinLockEnabled(e.target.checked)}
  className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500"
  />
  </div>
 
  <div className="space-y-1">
  <label className="block text-[11px] font-semibold text-slate-700 flex items-center gap-1">
- <KeyRound className="w-3.5 h-3.5 text-amber-500" /> ব্যাকআপ রিকভারি পিন (Emergency PIN)
+ <KeyRound className="w-3.5 h-3.5 text-amber-500" /> Backup Recovery PIN (Emergency PIN)
  </label>
  <input
  type="password"
- maxLength={6}
+ maxLength={8}
  value={recoveryPin}
  onChange={(e) => setRecoveryPin(e.target.value.replace(/[^\d]/g, ''))}
- placeholder="গোপন রিকভারি পিন লিখুন"
+ placeholder="Enter secret recovery PIN"
  className="w-full px-3 py-1.5 text-xs font-mono font-bold tracking-wider rounded-lg border border-slate-200 bg-white text-slate-800 focus:outline-none focus:border-[#3c8dbc]"
  />
  </div>
@@ -448,15 +451,15 @@ export const SettingsPage: React.FC<SettingsProps> = ({
  {onResetAllData && (
  <div className="bg-rose-50/70 border border-rose-200 rounded p-5 sm:p-6 shadow-sm space-y-3">
  <h3 className="text-base font-bold text-rose-900 flex items-center gap-2">
- <RotateCcw className="w-5 h-5 text-rose-600 " /> System Reset / নতুন অ্যাপ ডাটা রিসেট
+ <RotateCcw className="w-5 h-5 text-rose-600 " /> System Reset / Fresh App Data Reset
  </h3>
  <p className="text-xs text-rose-700 leading-relaxed">
- আপনি যদি ক্লায়েন্ট লিস্ট, পেমেন্ট রেকর্ড এবং আইএসপি মডিউল ডেটা নতুনভাবে শুরু করতে চান, তবে নিচে ক্লিক করে সমস্ত ডেমো বা পুরোনো তথ্য পরিষ্কার করে শূন্য (0) থেকে শুরু করতে পারেন।
+ If you want to start fresh with client lists, payment records, and ISP module data, click below to clear all demo or legacy data and start from zero (0).
  </p>
  <button
  type="button"
  onClick={() => {
- if (window.confirm('আপনি কি নিশ্চিত যে সমস্ত পুরানো ক্লায়েন্ট ও ডেমো তথ্য মুছে ফেলে একদম নতুন অ্যাপ হিসাবে শুরু করতে চান?')) {
+ if (window.confirm('Are you sure you want to delete all existing client & demo data and start as a completely fresh app?')) {
  onResetAllData();
  }
  }}
@@ -477,12 +480,12 @@ export const SettingsPage: React.FC<SettingsProps> = ({
  </div>
  </form>
 
- {/* Pattern Lock Configuration Modal */}
- <PatternLockSettingsModal
- isOpen={isPatternModalOpen}
- onClose={() => setIsPatternModalOpen(false)}
+ {/* PIN Lock Configuration Modal */}
+ <PinLockSettingsModal
+ isOpen={isPinModalOpen}
+ onClose={() => setIsPinModalOpen(false)}
  settings={settings}
- onSavePatternSettings={handleSavePatternConfig}
+ onSavePinSettings={handleSavePinConfig}
  showToast={showToast}
  />
  </div>

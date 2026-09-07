@@ -1,8 +1,18 @@
 @import "tailwindcss";
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   body {
-    @apply overflow-x-hidden bg-[#ecf0f5] text-slate-800 font-sans antialiased;
+    @apply overflow-x-hidden bg-[#ecf0f5] text-slate-800 font-sans;
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
   }
 }
 
@@ -13,20 +23,67 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #080e1e;
+  background: #dbe2ef;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: #3c8dbc;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #367fa9;
 }
 
 /* High contrast inputs and controls */
 input, select, textarea {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
+/* 🚀 Ultra-Smooth Scrolling Performance & GPU Layer Promotion */
+main,
+header,
+aside,
+.overflow-y-auto,
+.overflow-x-auto,
+.animate-page-enter {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+  will-change: scroll-position;
+}
+
+/* Hardware accelerated backdrop-blur so blurs do not lag during scroll */
+.backdrop-blur-xl,
+.backdrop-blur-lg,
+.backdrop-blur-md,
+.backdrop-blur-sm,
+.backdrop-blur-xs,
+.backdrop-blur-2xl {
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+/* Fast responsive page entry animation */
+@keyframes pageEnter {
+  from {
+    opacity: 0.9;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-page-enter {
+  animation: pageEnter 0.12s ease-out forwards;
+}
+
+/* Rendering performance containment for large content cards */
+.bg-white,
+.rounded-xl,
+.rounded-2xl {
+  contain: layout style;
+}

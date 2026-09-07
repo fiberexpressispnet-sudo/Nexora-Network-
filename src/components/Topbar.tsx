@@ -152,9 +152,9 @@ export const Topbar: React.FC<TopbarProps> = ({
  {filteredSearchClients.length === 0 ? (
  <div className="p-4 text-xs text-slate-800 text-center">No subscribers found matching search query</div>
  ) : (
- filteredSearchClients.map((client) => (
+ filteredSearchClients.map((client, idx) => (
  <div
- key={client.id}
+ key={client.id ? `${client.id}-${idx}` : idx}
  onClick={() => {
  onNavigate('clients');
  setSearchTerm('');
