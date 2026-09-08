@@ -169,47 +169,68 @@ export function parseValidityDays(
   packageName?: string,
   priceVal?: string | number
 ): number {
-  if (validityStr) {
-    const str = validityStr.trim().toLowerCase();
+  const parseFromText = (text: string): number | null => {
+    const str = text.trim().toLowerCase();
 
-    if (str.includes("year") || str.includes("yr")) {
-      const num = parseInt(str.match(/\d+/)?.[0] || "1", 10);
-      return Math.max(1, num * 365);
+    // 1. Year pattern
+    const yearMatch = str.match(/(\d+)\s*(?:year|years|yr|yrs|year's)\b/i);
+    if (yearMatch) {
+      return parseInt(yearMatch[1], 10) * 365;
     }
-    if (str.includes("month") || str.includes("mo")) {
-      const num = parseInt(str.match(/\d+/)?.[0] || "1", 10);
-      return Math.max(1, num * 30);
+    if (str.includes("yearly") || str.includes("annual")) {
+      return 365;
     }
-    if (str.includes("week") || str.includes("wk")) {
-      const num = parseInt(str.match(/\d+/)?.[0] || "1", 10);
-      return Math.max(1, num * 7);
+
+    // 2. Month pattern
+    const monthMatch = str.match(/(\d+)\s*(?:month|months|mo|mos|month's)\b/i);
+    if (monthMatch) {
+      return parseInt(monthMatch[1], 10) * 30;
     }
-    if (str.includes("hour") || str.includes("hr")) {
-      const hrs = parseInt(str.match(/\d+/)?.[0] || "24", 10);
+    if (str.includes("monthly")) {
+      return 30;
+    }
+
+    // 3. Week pattern
+    const weekMatch = str.match(/(\d+)\s*(?:week|weeks|wk|wks)\b/i);
+    if (weekMatch) {
+      return parseInt(weekMatch[1], 10) * 7;
+    }
+    if (str.includes("weekly")) {
+      return 7;
+    }
+
+    // 4. Day pattern
+    const dayMatch = str.match(/(\d+)\s*(?:day|days|d)\b/i);
+    if (dayMatch) {
+      return parseInt(dayMatch[1], 10);
+    }
+    if (str.includes("daily")) {
+      return 1;
+    }
+
+    // 5. Hour pattern
+    const hourMatch = str.match(/(\d+)\s*(?:hour|hours|hr|hrs)\b/i);
+    if (hourMatch) {
+      const hrs = parseInt(hourMatch[1], 10);
       return Math.max(1, Math.ceil(hrs / 24));
     }
-    if (str.includes("day") || str.includes("d")) {
-      const num = parseInt(str.match(/\d+/)?.[0] || "30", 10);
-      return Math.max(1, num);
-    }
 
-    const plainNum = parseInt(str.match(/\d+/)?.[0] || "", 10);
-    if (!isNaN(plainNum) && plainNum > 0) {
-      return plainNum;
-    }
+    return null;
+  };
+
+  // Try parsing validityStr first
+  if (validityStr) {
+    const val = parseFromText(validityStr);
+    if (val !== null) return val;
   }
 
+  // Try parsing packageName next
   if (packageName) {
-    const str = packageName.trim().toLowerCase();
-    if (str.includes("1 year") || str.includes("yearly")) return 365;
-    if (str.includes("1 month") || str.includes("monthly")) return 30;
-    if (str.includes("15 day") || str.includes("15days")) return 15;
-    if (str.includes("10 day") || str.includes("10days")) return 10;
-    if (str.includes("7 day") || str.includes("weekly") || str.includes("7days")) return 7;
-    if (str.includes("3 day") || str.includes("3days")) return 3;
-    if (str.includes("1 day") || str.includes("daily") || str.includes("24 hour")) return 1;
+    const val = parseFromText(packageName);
+    if (val !== null) return val;
   }
 
+  // Fallback to price values
   if (priceVal !== undefined && priceVal !== null) {
     const numPrice = typeof priceVal === "number" ? priceVal : parseFloat(String(priceVal).replace(/[^\d.]/g, ""));
     if (!isNaN(numPrice) && numPrice > 0) {

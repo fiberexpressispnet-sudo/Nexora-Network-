@@ -63,6 +63,7 @@ import {
   initialPayments,
   initialRouters,
   initialInvoices,
+  cleanPackageName,
 } from "./data/initialData";
 
 import { Sidebar } from "./components/Sidebar";
@@ -365,16 +366,71 @@ export function MainApp({
     uid,
   );
 
-  // Auto-migration: if the database packages are the dummy fallback list (Fiber 10) or empty, restore the 26 real packages
+  // Auto-migration & De-duplication: Clean names, remove duplicate packages, and append missing ones
   useEffect(() => {
+    if (!packages) return;
+
     if (
-      packages &&
-      ((packages.length === 5 && packages[0]?.name === "Fiber 10") ||
-        packages.length === 0)
+      (packages.length === 5 && packages[0]?.name === "Fiber 10") ||
+      packages.length === 0
     ) {
       setPackages(initialPackages);
+      return;
+    }
+
+    let mutated = false;
+    // 1. Clean names first
+    const cleaned = packages.map((p) => {
+      const cleanName = cleanPackageName(p.name);
+      if (p.name !== cleanName) {
+        mutated = true;
+        return { ...p, name: cleanName };
+      }
+      return p;
+    });
+
+    // 2. De-duplicate by both ID and Name to ensure absolutely unique packages
+    const uniquePkgs: Package[] = [];
+    const seenIds = new Set<number>();
+    const seenNames = new Set<string>();
+
+    for (const pkg of cleaned) {
+      if (!seenIds.has(pkg.id) && !seenNames.has(pkg.name)) {
+        uniquePkgs.push(pkg);
+        seenIds.add(pkg.id);
+        seenNames.add(pkg.name);
+      } else {
+        mutated = true;
+      }
+    }
+
+    // 3. Make sure all initialPackages are present
+    const missing = initialPackages.filter(
+      (initPkg) => !uniquePkgs.some((pkg) => pkg.name === initPkg.name || pkg.id === initPkg.id)
+    );
+    if (missing.length > 0) {
+      uniquePkgs.push(...missing);
+      mutated = true;
+    }
+
+    if (mutated) {
+      setPackages(uniquePkgs);
     }
   }, [packages, setPackages]);
+
+  // Auto-migration: Clean any "DFNHOB-" prefixes from saved clients' assigned packages
+  useEffect(() => {
+    if (clients && clients.some((c) => c.package && c.package.startsWith("DFNHOB"))) {
+      setClients((prev) => {
+        if (!prev) return prev;
+        return prev.map((c) => ({
+          ...c,
+          package: cleanPackageName(c.package),
+        }));
+      });
+    }
+  }, [clients, setClients]);
+
   const [bandwidthProfiles, setBandwidthProfiles] = usePersistentState<
     BandwidthProfile[]
   >("nexora_bandwidth", initialBandwidthProfiles, uid);
@@ -549,20 +605,13 @@ export function MainApp({
         const pTrx = p.notes
           ?.match(/TrxID:\s*([^\s|]+)/i)?.[1]
           ?.toLowerCase();
-        const userKey = (p.userId || p.clientName || "").toLowerCase().trim();
-        const pComposite = `${userKey}_${p.amount}_${p.dateKey || ""}_${(p.package || "").toLowerCase()}`;
 
         if (pTrx && seenTrxKeys.has(`completed_trx_${pTrx}`)) {
           modified = true;
           continue;
         }
-        if (pComposite && seenTrxKeys.has(`completed_comp_${pComposite}`)) {
-          modified = true;
-          continue;
-        }
 
         if (pTrx) seenTrxKeys.add(`completed_trx_${pTrx}`);
-        if (pComposite) seenTrxKeys.add(`completed_comp_${pComposite}`);
       }
 
       seenIds.add(p.id);
@@ -1445,7 +1494,7 @@ export function MainApp({
 
     setClients((prev) =>
       prev.map((c) =>
-        String(c.id) === String(finalClient.id) || c.userId === finalClient.userId
+        String(c.id) === String(finalClient.id)
           ? finalClient
           : c,
       ),
@@ -1499,7 +1548,20 @@ export function MainApp({
 
     const pkg = findPackageByDetails(packages, targetClient.package, targetClient.price);
     const validityDays = parseValidityDays(pkg?.validity, targetClient.package, targetClient.price);
-    const daysToAdd = months * validityDays;
+    
+    let daysToAdd = 30;
+    // Check if months is a fractional/decimal number (from BillingModal custom options)
+    if (months % 1 !== 0) {
+      daysToAdd = Math.round(months * 30);
+    } else {
+      // If it's a whole number of months (like 1, 2, 3)
+      if (months === 1) {
+        // Direct Renew button uses months=1, we should extend by the package's actual validity
+        daysToAdd = validityDays;
+      } else {
+        daysToAdd = Math.round(months * validityDays);
+      }
+    }
 
     const isPendingOrExpired =
       targetClient.status === "pending_approval" ||
@@ -1544,15 +1606,17 @@ export function MainApp({
   const handleCollectPayment = (paymentData: {
     clientId: string;
     amount: number;
-    months: number;
+    months?: number;
+    validityMonths?: number;
     paymentMethod: string;
     transactionId?: string;
     discount?: number;
     notes?: string;
   }) => {
+    const finalMonths = paymentData.months !== undefined ? paymentData.months : (paymentData.validityMonths !== undefined ? paymentData.validityMonths : 1);
     handleRenewClient(
       paymentData.clientId,
-      paymentData.months,
+      finalMonths,
       paymentData.amount,
       paymentData.paymentMethod,
     );
@@ -1616,9 +1680,7 @@ export function MainApp({
     // 2. Synchronously update local client state
     setClients((prev) =>
       prev.map((c) =>
-        c.id === target.id ||
-        c.userId === target.userId ||
-        (target.phone && c.phone === target.phone)
+        c.id === target.id
           ? updatedClient
           : c,
       ),

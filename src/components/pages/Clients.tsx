@@ -16,6 +16,7 @@ import {
   addDaysToExpiry,
   getLiveCountdown,
   parseValidityDays,
+  findPackageByDetails,
 } from "../../lib/expiryUtils";
 import { ClientBandwidthGraph } from "../ClientBandwidthGraph";
 import { SmsReminderModal } from "../SmsReminderModal";
@@ -2937,102 +2938,106 @@ export const ClientsPage: React.FC<ClientsProps> = ({
         onClose={() => setRenewPaymentClient(null)}
         maxWidth="max-w-md"
       >
-        {renewPaymentClient && (
-          <div className="space-y-4">
-            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4 text-sm text-slate-700 ">
-              <p>
-                You are about to renew{" "}
-                <strong>{renewPaymentClient.package}</strong> for{" "}
-                <strong>30 Days</strong>.
-              </p>
-              <p>This action will record a payment to the system.</p>
-            </div>
+        {renewPaymentClient && (() => {
+          const pkg = findPackageByDetails(packages, renewPaymentClient.package, renewPaymentClient.price);
+          const validityDays = parseValidityDays(pkg?.validity, renewPaymentClient.package, renewPaymentClient.price);
+          return (
+            <div className="space-y-4">
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4 text-sm text-slate-700 ">
+                <p>
+                  You are about to renew{" "}
+                  <strong>{renewPaymentClient.package}</strong> for{" "}
+                  <strong>{validityDays} Days</strong>.
+                </p>
+                <p>This action will record a payment to the system.</p>
+              </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Payment Amount (৳)
-              </label>
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-800" />
-                <input
-                  type="number"
-                  value={renewPaymentAmount || ""}
-                  onChange={(e) =>
-                    setRenewPaymentAmount(Number(e.target.value))
-                  }
-                  className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-900 "
-                  placeholder="e.g. 500"
-                />
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Payment Amount (৳)
+                </label>
+                <div className="relative">
+                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-800" />
+                  <input
+                    type="number"
+                    value={renewPaymentAmount || ""}
+                    onChange={(e) =>
+                      setRenewPaymentAmount(Number(e.target.value))
+                    }
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-900 "
+                    placeholder="e.g. 500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Payment Method
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {["bKash", "Nagad", "Rocket", "Cash", "Bank"].map((method) => {
+                    const logoUrl =
+                      settings.paymentLogos?.[
+                        method.toLowerCase() as keyof typeof settings.paymentLogos
+                      ];
+                    return (
+                      <button
+                        key={method}
+                        type="button"
+                        onClick={() => setRenewPaymentMethod(method as any)}
+                        className={`p-2 rounded-lg text-xs font-bold border flex flex-col items-center justify-center gap-2 transition-colors min-h-[70px] ${
+                          renewPaymentMethod === method
+                            ? "bg-sky-50 border-sky-500 text-sky-700 shadow-sm"
+                            : "bg-white border-slate-200 text-slate-900 hover:border-sky-300 hover:shadow-sm"
+                        }`}
+                      >
+                        {logoUrl && (
+                          <div className="h-8 w-full flex items-center justify-center">
+                            <img
+                              src={logoUrl}
+                              alt={method}
+                              className="h-full max-w-full object-contain"
+                            />
+                          </div>
+                        )}
+                        <span>{method}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setRenewPaymentClient(null)}
+                  className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onRenewClient(
+                      renewPaymentClient.id,
+                      validityDays / 30,
+                      renewPaymentAmount,
+                      renewPaymentMethod,
+                    );
+                    showToast(
+                      `${renewPaymentClient.name} renewed for ${validityDays} days and payment recorded.`,
+                      "success",
+                    );
+                    setRenewPaymentClient(null);
+                  }}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm flex items-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" /> Save & Renew
+                </button>
               </div>
             </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Payment Method
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {["bKash", "Nagad", "Rocket", "Cash", "Bank"].map((method) => {
-                  const logoUrl =
-                    settings.paymentLogos?.[
-                      method.toLowerCase() as keyof typeof settings.paymentLogos
-                    ];
-                  return (
-                    <button
-                      key={method}
-                      type="button"
-                      onClick={() => setRenewPaymentMethod(method as any)}
-                      className={`p-2 rounded-lg text-xs font-bold border flex flex-col items-center justify-center gap-2 transition-colors min-h-[70px] ${
-                        renewPaymentMethod === method
-                          ? "bg-sky-50 border-sky-500 text-sky-700 shadow-sm"
-                          : "bg-white border-slate-200 text-slate-900 hover:border-sky-300 hover:shadow-sm"
-                      }`}
-                    >
-                      {logoUrl && (
-                        <div className="h-8 w-full flex items-center justify-center">
-                          <img
-                            src={logoUrl}
-                            alt={method}
-                            className="h-full max-w-full object-contain"
-                          />
-                        </div>
-                      )}
-                      <span>{method}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-4">
-              <button
-                type="button"
-                onClick={() => setRenewPaymentClient(null)}
-                className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold hover:bg-slate-200 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onRenewClient(
-                    renewPaymentClient.id,
-                    1,
-                    renewPaymentAmount,
-                    renewPaymentMethod,
-                  );
-                  showToast(
-                    `${renewPaymentClient.name} renewed for 30 days and payment recorded.`,
-                    "success",
-                  );
-                  setRenewPaymentClient(null);
-                }}
-                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm flex items-center gap-1.5"
-              >
-                <Check className="w-4 h-4" /> Save & Renew
-              </button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
 
       {/* MODAL: SMS SUBSCRIPTION REMINDER */}

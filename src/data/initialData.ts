@@ -14,7 +14,7 @@ import {
  RouterConfig,
 } from '../types';
 
-export const initialClients: Client[] = [
+const rawInitialClients: Client[] = [
   {
     id: 'CL-0001',
     name: 'Tanvir Hossain',
@@ -125,7 +125,7 @@ export const initialClients: Client[] = [
   },
 ];
 
-export const initialPackages: Package[] = [
+const rawInitialPackages: Package[] = [
   {
     id: 1,
     name: 'DFNHOB1-25 Mbps (Monthly Pac)',
@@ -463,6 +463,58 @@ export const initialPackages: Package[] = [
     description: '375 Mbps (24 Hours || Shared)\nBandwidth Shared (1:8 Ratio)\nOptical Fiber Connection\nConnection Charge Free\n24/7 Customer Support',
     status: 'active',
     deviceType: 'Router',
+  },
+  {
+    id: 27,
+    name: 'DFNHOB-20 Mbps (30 Day Pac)',
+    price: '300',
+    validity: '30 Days',
+    speed: '20 Mbps',
+    upload: '10 Mbps',
+    installFee: '0',
+    renewal: '300',
+    description: '20 Mbps Speed 30 Day 300 tk\nOptical Fiber Connection\nConnection Charge Free\n24/7 Customer Support',
+    status: 'active',
+    deviceType: 'Router',
+  },
+  {
+    id: 28,
+    name: 'DFNHOB-20 Mbps (20 Day Pac)',
+    price: '200',
+    validity: '20 Days',
+    speed: '20 Mbps',
+    upload: '10 Mbps',
+    installFee: '0',
+    renewal: '200',
+    description: '20 Mbps Speed 20 Day 200 tk\nOptical Fiber Connection\nConnection Charge Free\n24/7 Customer Support',
+    status: 'active',
+    deviceType: 'Router',
+  },
+  {
+    id: 29,
+    name: 'DFNHOB-20 Mbps (10 Day Pac)',
+    price: '100',
+    validity: '10 Days',
+    speed: '20 Mbps',
+    upload: '10 Mbps',
+    installFee: '0',
+    renewal: '100',
+    description: '20 Mbps Speed 10 Day 100 tk\nOptical Fiber Connection\nConnection Charge Free\n24/7 Customer Support',
+    status: 'active',
+    deviceType: 'Router',
+  },
+  {
+    id: 30,
+    name: 'DFNHOB-20 Mbps (24 Hours Pac)',
+    price: '20',
+    validity: '24 Hours',
+    speed: '20 Mbps',
+    upload: '10 Mbps',
+    installFee: '0',
+    renewal: '20',
+    description: '20 Mbps Speed 24 Hours 20 tk\nOptical Fiber Connection\nConnection Charge Free\n24/7 Customer Support',
+    status: 'active',
+    deviceType: 'Router',
   }
 ];
 
@@ -689,4 +741,27 @@ export const generateInitialPayments = (): PaymentRecord[] => {
 export const initialPayments: PaymentRecord[] = generateInitialPayments();
 
 export const initialInvoices: Invoice[] = [];
+
+export function cleanPackageName(name: string): string {
+  if (!name) return name;
+  if (name.startsWith("DFNHOB")) {
+    const hasRealIp = name.toLowerCase().includes("real ip");
+    let cleaned = name.replace(/^DFNHOB[^-]*-/, '');
+    if (hasRealIp && !cleaned.toLowerCase().includes("real ip")) {
+      cleaned = cleaned + " (Real IP)";
+    }
+    return cleaned;
+  }
+  return name;
+}
+
+export const initialClients: Client[] = rawInitialClients.map(c => ({
+  ...c,
+  package: cleanPackageName(c.package)
+}));
+
+export const initialPackages: Package[] = rawInitialPackages.map(p => ({
+  ...p,
+  name: cleanPackageName(p.name)
+}));
 

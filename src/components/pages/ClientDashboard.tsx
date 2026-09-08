@@ -160,6 +160,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const [selectedPackage, setSelectedPackage] = useState<string>(
     client.package,
   );
+  const [selectedPackageId, setSelectedPackageId] = useState<number | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<
     "bKash" | "Nagad" | "Rocket" | "Bank"
   >("bKash");
@@ -459,7 +460,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           if (local) allClients = JSON.parse(local);
         }
         const nextClients = allClients.map((c) =>
-          c.id === updatedClient.id || c.userId === updatedClient.userId
+          c.id === updatedClient.id || (updatedClient.userId && updatedClient.userId.trim() !== "" && c.userId === updatedClient.userId)
             ? updatedClient
             : c,
         );
@@ -803,7 +804,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     setGeneratedTrxId(finalTrx);
 
     try {
-      const chosenPkg = packages.find((p) => p.name === selectedPackage) || {
+      const chosenPkg = (selectedPackageId !== null
+        ? packages.find((p) => p.id === selectedPackageId)
+        : packages.find((p) => p.name === selectedPackage)) || {
         price: activeClient.price || "500",
         speed: activeClient.downloadSpeed || "10 Mbps",
       };
@@ -1314,7 +1317,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         PACKAGE
                       </p>
                       <p className="text-base font-black tracking-tight leading-tight mt-1">
-                        {activeClient.package || "DFNHOB1-25 Mbps"}
+                        {activeClient.package || "25 Mbps"}
                       </p>
                     </div>
                   </div>
@@ -1789,7 +1792,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                     })
                     .map((pkg, idx) => {
                     const numericSpeed = pkg.speed.replace(/\D/g, "");
-                    const isSelected = selectedPackage === pkg.name;
+                    const isSelected = selectedPackageId !== null ? selectedPackageId === pkg.id : selectedPackage === pkg.name;
 
                     const themes = [
                       {
@@ -1846,7 +1849,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                     return (
                       <div
                         key={pkg.id}
-                        onClick={() => setSelectedPackage(pkg.name)}
+                        onClick={() => {
+                          setSelectedPackage(pkg.name);
+                          setSelectedPackageId(pkg.id);
+                        }}
                         className={`flex flex-col rounded-[24px] overflow-hidden transition-all duration-300 cursor-pointer bg-white border border-slate-200/80 ${
                           isSelected
                             ? "ring-4 ring-cyan-500/80 shadow-2xl scale-[1.02]"
@@ -2088,9 +2094,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                         ৳
                         {
                           (
-                            packages.find(
-                              (p) => p.name === selectedPackage,
-                            ) || { price: activeClient.price || "500" }
+                            (selectedPackageId !== null
+                              ? packages.find((p) => p.id === selectedPackageId)
+                              : packages.find((p) => p.name === selectedPackage)) || { price: activeClient.price || "500" }
                           ).price
                         }
                       </span>
@@ -2103,7 +2109,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                       transfer to <strong>{merchantPaymentNumber}</strong> ৳
                       {
                         (
-                          packages.find((p) => p.name === selectedPackage) || {
+                          (selectedPackageId !== null
+                            ? packages.find((p) => p.id === selectedPackageId)
+                            : packages.find((p) => p.name === selectedPackage)) || {
                             price: activeClient.price || "500",
                           }
                         ).price
@@ -2131,7 +2139,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                       ৳
                       {
                         (
-                          packages.find((p) => p.name === selectedPackage) || {
+                          (selectedPackageId !== null
+                            ? packages.find((p) => p.id === selectedPackageId)
+                            : packages.find((p) => p.name === selectedPackage)) || {
                             price: activeClient.price || "500",
                           }
                         ).price
@@ -2501,9 +2511,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                             ৳
                             {
                               (
-                                packages.find(
-                                  (p) => p.name === selectedPackage,
-                                ) || { price: activeClient.price || "500" }
+                                (selectedPackageId !== null
+                                  ? packages.find((p) => p.id === selectedPackageId)
+                                  : packages.find((p) => p.name === selectedPackage)) || { price: activeClient.price || "500" }
                               ).price
                             }{" "}
                             BDT

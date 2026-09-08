@@ -627,7 +627,7 @@ export const RevenueTrackerPage: React.FC<RevenueTrackerProps> = ({
                   <span className="text-xs font-bold text-[#00a65a] uppercase tracking-wider">
                     Current Month Gross Revenue
                   </span>
-                  <div className="text-2xl sm:text-3xl font-bold text-slate-800">
+                  <div className="text-2xl sm:text-3xl font-bold text-white">
                     ৳{runningMonthTotal.toLocaleString()}
                   </div>
                 </div>
@@ -650,7 +650,7 @@ export const RevenueTrackerPage: React.FC<RevenueTrackerProps> = ({
                   <span className="text-xs font-bold text-sky-400 uppercase tracking-wider">
                     Today Total Collection
                   </span>
-                  <div className="text-2xl sm:text-3xl font-bold text-slate-800">
+                  <div className="text-2xl sm:text-3xl font-bold text-white">
                     ৳{todayTotal.toLocaleString()}
                   </div>
                 </div>
@@ -674,7 +674,7 @@ export const RevenueTrackerPage: React.FC<RevenueTrackerProps> = ({
                   <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
                     Recharged Subscribers Count
                   </span>
-                  <div className="text-2xl sm:text-3xl font-bold text-slate-800">
+                  <div className="text-2xl sm:text-3xl font-bold text-white">
                     {runningMonthPayments.length} Clients
                   </div>
                 </div>
@@ -702,7 +702,7 @@ export const RevenueTrackerPage: React.FC<RevenueTrackerProps> = ({
                   <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
                     Peak Revenue Day
                   </span>
-                  <div className="text-2xl sm:text-3xl font-bold text-slate-800">
+                  <div className="text-2xl sm:text-3xl font-bold text-white">
                     {peakDayRunningMonth.day} Date
                   </div>
                 </div>

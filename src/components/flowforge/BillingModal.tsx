@@ -65,7 +65,7 @@ export const BillingModal: React.FC<BillingModalProps> = ({
  useEffect(() => {
  if (selectedClient) {
  const price = parseFloat(selectedClient.price || '800') || 800;
- setAmount(price * validityMonths);
+ setAmount(Math.round(price * validityMonths));
  }
  }, [selectedClient, validityMonths]);
 
@@ -199,27 +199,62 @@ export const BillingModal: React.FC<BillingModalProps> = ({
  </div>
  )}
 
- {/* Validity Months */}
- <div className="space-y-1.5">
+ {/* Validity Duration */}
+ <div className="space-y-2">
  <label className="text-xs font-semibold text-slate-900 flex items-center justify-between">
- <span>Validity Duration (Months)</span>
- <span className="text-[10px] text-indigo-400 font-mono">+{validityMonths * 30} Days</span>
+ <span>Validity Duration (মেয়াদ)</span>
+ <span className="text-[10px] text-indigo-500 font-bold font-mono bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+ +{Math.round(validityMonths * 30) >= 1 ? `${Math.round(validityMonths * 30)} Days` : '24 Hours'}
+ </span>
  </label>
+ 
+ <div>
+ <div className="text-[10px] text-slate-800 font-bold mb-1 uppercase tracking-wider">Standard (মাসের মেয়াদ)</div>
  <div className="grid grid-cols-4 gap-2">
- {[1, 2, 3, 6].map((m) => (
+ {[
+ { label: '1 Month', value: 1 },
+ { label: '2 Months', value: 2 },
+ { label: '3 Months', value: 3 },
+ { label: '6 Months', value: 6 },
+ ].map((opt) => (
  <button
- key={m}
+ key={opt.label}
  type="button"
- onClick={() => setValidityMonths(m)}
- className={`py-2 rounded text-xs font-bold border transition-all cursor-pointer ${
- validityMonths === m
+ onClick={() => setValidityMonths(opt.value)}
+ className={`py-1.5 rounded text-xs font-bold border transition-all cursor-pointer ${
+ Math.abs(validityMonths - opt.value) < 0.001
  ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-500/25'
- : 'bg-white border-slate-300 text-slate-900 hover:bg-white'
+ : 'bg-white border-slate-300 text-slate-900 hover:bg-slate-50'
  }`}
  >
- {m} {m === 1 ? 'Month' : 'Months'}
+ {opt.label}
  </button>
  ))}
+ </div>
+ </div>
+
+ <div>
+ <div className="text-[10px] text-slate-800 font-bold mb-1 uppercase tracking-wider">Custom / Short (দিনের মেয়াদ)</div>
+ <div className="grid grid-cols-3 gap-2">
+ {[
+ { label: '20 Days', value: 20 / 30 },
+ { label: '10 Days', value: 10 / 30 },
+ { label: '24 Hours', value: 1 / 30 },
+ ].map((opt) => (
+ <button
+ key={opt.label}
+ type="button"
+ onClick={() => setValidityMonths(opt.value)}
+ className={`py-1.5 rounded text-xs font-bold border transition-all cursor-pointer ${
+ Math.abs(validityMonths - opt.value) < 0.001
+ ? 'bg-violet-600 border-violet-500 text-white shadow-md shadow-violet-500/25'
+ : 'bg-white border-slate-300 text-slate-900 hover:bg-slate-50'
+ }`}
+ >
+ ⚡ {opt.label}
+ </button>
+ ))}
+ </div>
  </div>
  </div>
 

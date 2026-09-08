@@ -540,11 +540,84 @@ export const Dashboard: React.FC<DashboardProps> = ({
  <span>{item.name}</span>
  </span>
  <span className="font-bold text-slate-900">{item.value}</span>
- </div>
- ))}
- </div>
- </div>
- </div>
+  </div>
+  ))}
+  </div>
+  </div>
+  </div>
+
+  {/* 5. Running Month Payment Collections & Recent History */}
+  <div className="rounded bg-white border border-slate-200 border-t-[3px] border-t-emerald-500 p-5 shadow-sm shadow-md space-y-4">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+      <div>
+        <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+          <CreditCard className="w-5 h-5 text-emerald-500" />
+          <span>চলতি মাসের কালেকশন হিস্টোরি (Payment History - This Month)</span>
+        </h3>
+        <p className="text-xs text-slate-500">
+          রিনিউয়াল এবং পেমেন্ট কালেকশনের লাইভ হিস্টোরি ও ট্রানজেকশন ট্র্যাকার
+        </p>
+      </div>
+      <div className="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded text-xs font-bold font-mono">
+        মোট কালেকশন: {currencySymbol}{currentMonthRevenue.toLocaleString()} BDT ({payments.filter(p => p.monthKey === currentMonthKey).length}টি)
+      </div>
+    </div>
+
+    <div className="overflow-x-auto border border-slate-200/60 rounded-lg">
+      <table className="w-full text-left text-xs">
+        <thead className="bg-slate-100 text-slate-700 uppercase font-mono text-[10px]">
+          <tr>
+            <th className="p-3">তারিখ ও সময় (Date & Time)</th>
+            <th className="p-3">গ্রাহক (Subscriber)</th>
+            <th className="p-3">ইউজার আইডি (User ID)</th>
+            <th className="p-3">প্যাকেজ (Package)</th>
+            <th className="p-3">টাকার পরিমাণ (Amount)</th>
+            <th className="p-3">পেমেন্ট মাধ্যম (Method)</th>
+            <th className="p-3">কালেক্টর (Collector)</th>
+            <th className="p-3">স্ট্যাটাস (Status)</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-200">
+          {payments && payments.length > 0 ? (
+            payments.slice(0, 10).map((payment, idx) => (
+              <tr key={payment.id || idx} className="hover:bg-slate-50 transition-colors">
+                <td className="p-3 font-mono text-slate-600">{payment.timestamp || 'N/A'}</td>
+                <td className="p-3 font-bold text-slate-900">{payment.clientName}</td>
+                <td className="p-3 font-mono font-semibold text-indigo-600">{payment.userId}</td>
+                <td className="p-3 text-slate-600 font-semibold">{payment.package || 'N/A'}</td>
+                <td className="p-3 font-mono font-black text-emerald-600">
+                  {currencySymbol}{payment.amount.toLocaleString()}
+                </td>
+                <td className="p-3">
+                  <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-100 text-slate-700">
+                    {payment.paymentMethod}
+                  </span>
+                </td>
+                <td className="p-3 text-slate-600 font-medium text-[11px]">{payment.collector || 'System'}</td>
+                <td className="p-3">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono ${
+                    payment.status === 'Completed' || payment.status === 'approved'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : payment.status === 'Pending' || payment.status === 'Pending Approval'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-rose-100 text-rose-800'
+                  }`}>
+                    {payment.status}
+                  </span>
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={8} className="p-8 text-center text-slate-500 text-xs">
+                কোন কালেকশন রেকর্ড পাওয়া যায়নি (No collections found)
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  </div>
 
  {/* FlowForge Modals */}
  <BillingModal

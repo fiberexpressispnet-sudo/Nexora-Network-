@@ -143,11 +143,13 @@ export const SubscriptionsPage: React.FC<SubscriptionsPageProps> = ({
  if (!selectedClientForRenew) return;
 
  const monthlyPrice = parseFloat(selectedClientForRenew.price || '500') || 500;
- const totalAmount = monthlyPrice * renewMonths;
+ const totalAmount = Math.round(monthlyPrice * renewMonths);
+ const daysAdded = Math.round(renewMonths * 30);
+ const durationText = daysAdded >= 1 ? `${daysAdded} Days` : '24 Hours';
 
  onRenewClient(selectedClientForRenew.id, renewMonths, totalAmount, paymentMethod);
  showToast(
- `Package renewal completed! ${selectedClientForRenew.name} validity extended by ${renewMonths} month(s).`,
+ `Package renewal completed! ${selectedClientForRenew.name} validity extended by ${durationText}.`,
  'success'
  );
  setSelectedClientForRenew(null);
@@ -455,22 +457,56 @@ export const SubscriptionsPage: React.FC<SubscriptionsPageProps> = ({
 
  <form onSubmit={handleRenewSubmit} className="space-y-4 text-xs">
  <div>
- <label className="block font-bold text-slate-800 mb-1">Select Duration (Months)</label>
+ <label className="block font-bold text-slate-800 mb-1">Select Duration (মেয়াদ)</label>
+ <div className="space-y-2">
+ <div>
+ <div className="text-[10px] text-slate-800 font-bold mb-1 uppercase tracking-wider">Standard (মাসের মেয়াদ)</div>
  <div className="grid grid-cols-4 gap-2">
- {[1, 2, 3, 6].map((m) => (
+ {[
+ { label: '1 Month', value: 1 },
+ { label: '2 Months', value: 2 },
+ { label: '3 Months', value: 3 },
+ { label: '6 Months', value: 6 },
+ ].map((opt) => (
  <button
- key={m}
+ key={opt.label}
  type="button"
- onClick={() => setRenewMonths(m)}
- className={`py-2 rounded-lg font-bold border transition-all cursor-pointer ${
- renewMonths === m
+ onClick={() => setRenewMonths(opt.value)}
+ className={`py-1.5 rounded-lg font-bold border transition-all cursor-pointer ${
+ Math.abs(renewMonths - opt.value) < 0.001
  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
- : 'bg-slate-100 text-slate-700 border-slate-300 '
+ : 'bg-slate-100 text-slate-700 border-slate-300'
  }`}
  >
- {m} Month{m > 1 ? 's' : ''}
+ {opt.label}
  </button>
  ))}
+ </div>
+ </div>
+
+ <div>
+ <div className="text-[10px] text-slate-800 font-bold mb-1 uppercase tracking-wider">Custom / Short (দিনের মেয়াদ)</div>
+ <div className="grid grid-cols-3 gap-2">
+ {[
+ { label: '20 Days', value: 20 / 30 },
+ { label: '10 Days', value: 10 / 30 },
+ { label: '24 Hours', value: 1 / 30 },
+ ].map((opt) => (
+ <button
+ key={opt.label}
+ type="button"
+ onClick={() => setRenewMonths(opt.value)}
+ className={`py-1.5 rounded-lg font-bold border transition-all cursor-pointer ${
+ Math.abs(renewMonths - opt.value) < 0.001
+ ? 'bg-amber-600 text-white border-amber-500 shadow-sm'
+ : 'bg-slate-100 text-slate-700 border-slate-300'
+ }`}
+ >
+ ⚡ {opt.label}
+ </button>
+ ))}
+ </div>
+ </div>
  </div>
  </div>
 
@@ -506,11 +542,11 @@ export const SubscriptionsPage: React.FC<SubscriptionsPageProps> = ({
  <div>
  <div className="text-[10px] text-amber-300 uppercase font-bold">Total Collection Amount</div>
  <div className="text-lg font-black text-amber-400">
- ৳{(parseFloat(selectedClientForRenew.price || '500') || 500) * renewMonths}
+ ৳{Math.round((parseFloat(selectedClientForRenew.price || '500') || 500) * renewMonths)}
  </div>
  </div>
  <div className="text-right text-[11px] text-slate-900">
- <div>Auto Extend +{renewMonths * 30} Days</div>
+ <div>Auto Extend +{Math.round(renewMonths * 30) >= 1 ? `${Math.round(renewMonths * 30)} Days` : '24 Hours'}</div>
  <div className="text-[#00a65a] font-bold">MikroTik Auto Unblock</div>
  </div>
  </div>

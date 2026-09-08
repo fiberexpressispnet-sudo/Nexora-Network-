@@ -55,18 +55,18 @@ export const MemberLedgerModal: React.FC<MemberLedgerModalProps> = ({
  <BookOpen className="w-5 h-5" />
  </div>
  <div>
- <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+ <h3 className="text-base font-bold text-white flex items-center gap-2">
  <span>Member Account Ledger</span>
  <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono">
  {client.userId}
  </span>
  </h3>
- <p className="text-xs text-slate-800">Comprehensive subscription history, fee collections &amp; receipts</p>
+ <p className="text-xs text-slate-300">Comprehensive subscription history, fee collections &amp; receipts</p>
  </div>
  </div>
  <button
  onClick={onClose}
- className="p-1.5 rounded-lg text-slate-800 hover:text-slate-800 hover:bg-white transition-colors"
+ className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
  >
  <X className="w-5 h-5" />
  </button>
