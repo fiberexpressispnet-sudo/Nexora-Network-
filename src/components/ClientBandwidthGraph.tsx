@@ -21,7 +21,7 @@ export const ClientBandwidthGraph: React.FC<ClientBandwidthGraphProps> = ({
   const maxDl = Math.max(5, parseFloat(client.downloadSpeed || "20"));
   const maxUl = Math.max(2, parseFloat(client.uploadSpeed || "10"));
 
-  // 25 data points sliding window
+  // 25 data points sliding window (clean 0.0 baseline)
   const [dataHistory, setDataHistory] = useState<DataPoint[]>(() => {
     const initial: DataPoint[] = [];
     const now = Date.now();
@@ -30,90 +30,109 @@ export const ClientBandwidthGraph: React.FC<ClientBandwidthGraphProps> = ({
         minute: "2-digit",
         second: "2-digit",
       });
-
-      if (isOnline) {
-        // Vary speed realistically between 40% and 90% of allocated package speed
-        const baseDl =
-          maxDl *
-          (0.45 + Math.sin(i * 0.5) * 0.35 + (Math.random() * 0.1 - 0.05));
-        const baseUl =
-          maxUl *
-          (0.35 + Math.cos(i * 0.5) * 0.25 + (Math.random() * 0.1 - 0.05));
-        initial.push({
-          time: timeStr,
-          download: parseFloat(
-            Math.max(0.1, Math.min(maxDl, baseDl)).toFixed(1),
-          ),
-          upload: parseFloat(Math.max(0.1, Math.min(maxUl, baseUl)).toFixed(1)),
-        });
-      } else {
-        // Offline -> Flat 0.0 Mbps
-        initial.push({
-          time: timeStr,
-          download: 0.0,
-          upload: 0.0,
-        });
-      }
+      initial.push({
+        time: timeStr,
+        download: 0.0,
+        upload: 0.0,
+      });
     }
     return initial;
   });
 
   const [currentSpeed, setCurrentSpeed] = useState({
-    download: isOnline ? parseFloat((maxDl * 0.72).toFixed(1)) : 0.0,
-    upload: isOnline ? parseFloat((maxUl * 0.55).toFixed(1)) : 0.0,
-    ping: isOnline ? Math.floor(3 + Math.random() * 4) : 0,
-    packets: isOnline ? Math.floor(120 + Math.random() * 80) : 0,
+    download: 0.0,
+    upload: 0.0,
+    ping: 0,
+    packets: 0,
   });
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    if (!isOnline) {
+      setCurrentSpeed({ download: 0.0, upload: 0.0, ping: 0, packets: 0 });
+      return;
+    }
+
+    let isMounted = true;
+
+    const pollClientTelemetry = async () => {
+      let dl = 0.0;
+      let ul = 0.0;
+      let pkts = 0;
+
+      try {
+        let savedRouter: any = null;
+        try {
+          const raw = localStorage.getItem("fe_mikrotik_config");
+          if (raw) savedRouter = JSON.parse(raw);
+        } catch {}
+
+        if (savedRouter?.ip && savedRouter?.connected) {
+          const res = await fetch("/api/mikrotik/traffic", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              router: {
+                ip: savedRouter.ip,
+                apiPort: Number(savedRouter.port) || 8728,
+                username: savedRouter.user || savedRouter.username || "admin",
+                password: savedRouter.password || "",
+                connected: true,
+                isDemo: savedRouter.isDemo,
+              },
+            }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && Array.isArray(data.queues)) {
+              const q = data.queues.find(
+                (item: any) =>
+                  item.name === `nexora_${client.userId}` ||
+                  item.name === client.userId ||
+                  (client.ipAddress && item.target?.includes(client.ipAddress)),
+              );
+              if (q) {
+                dl = Number(q.rxMbps) || (Number(q.rxBps) || 0) / 1000000;
+                ul = Number(q.txMbps) || (Number(q.txBps) || 0) / 1000000;
+              }
+            }
+          }
+        }
+      } catch {}
+
+      if (!isMounted) return;
+
       const now = new Date();
       const timeStr = now.toLocaleTimeString([], {
         minute: "2-digit",
         second: "2-digit",
       });
 
-      if (client.status === "online") {
-        const dl = parseFloat(
-          Math.max(
-            0.2,
-            Math.min(maxDl * 1.05, maxDl * (0.5 + Math.random() * 0.45)),
-          ).toFixed(1),
-        );
-        const ul = parseFloat(
-          Math.max(
-            0.1,
-            Math.min(maxUl * 1.05, maxUl * (0.35 + Math.random() * 0.5)),
-          ).toFixed(1),
-        );
-        const pingVal = Math.floor(3 + Math.random() * 4);
-        const pks = Math.floor(100 + Math.random() * 120);
+      const finalDl = parseFloat(dl.toFixed(1));
+      const finalUl = parseFloat(ul.toFixed(1));
 
-        setCurrentSpeed({
-          download: dl,
-          upload: ul,
-          ping: pingVal,
-          packets: pks,
-        });
+      setCurrentSpeed({
+        download: finalDl,
+        upload: finalUl,
+        ping: finalDl > 0 ? 2 : 0,
+        packets: pkts,
+      });
 
-        setDataHistory((prev) => {
-          const next = [...prev.slice(1)];
-          next.push({ time: timeStr, download: dl, upload: ul });
-          return next;
-        });
-      } else {
-        // Offline -> Flat zero
-        setCurrentSpeed({ download: 0.0, upload: 0.0, ping: 0, packets: 0 });
-        setDataHistory((prev) => {
-          const next = [...prev.slice(1)];
-          next.push({ time: timeStr, download: 0.0, upload: 0.0 });
-          return next;
-        });
-      }
-    }, 1500);
+      setDataHistory((prev) => {
+        const next = [...prev.slice(1)];
+        next.push({ time: timeStr, download: finalDl, upload: finalUl });
+        return next;
+      });
+    };
 
-    return () => clearInterval(interval);
-  }, [client.status, maxDl, maxUl]);
+    pollClientTelemetry();
+    const interval = setInterval(pollClientTelemetry, 2000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [client.userId, client.ipAddress, isOnline]);
 
   // Mini sparkline for compact mode
   if (compact) {

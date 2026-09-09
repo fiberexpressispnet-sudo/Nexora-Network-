@@ -81,6 +81,248 @@ export type MikrotikErrorCode =
   | "UNSUPPORTED_OPERATION"
   | "INVALID_CONFIGURATION";
 
+export interface MikrotikError {
+  code: MikrotikErrorCode;
+  message: string;
+  operation?: string;
+  detail?: string;
+}
+
+export interface MikrotikOperationResult<T = any> {
+  success: boolean;
+  data?: T;
+  error?: MikrotikError;
+  message?: string;
+}
+
+export interface MikrotikInterfaceStats {
+  name: string;
+  type: string;
+  running: boolean;
+  disabled: boolean;
+  rxBytes: number;
+  txBytes: number;
+  rxPackets: number;
+  txPackets: number;
+  rxErrors: number;
+  txErrors: number;
+  rxBps: number;
+  txBps: number;
+  rxMbps: number;
+  txMbps: number;
+  rxPacketsPerSec: number;
+  txPacketsPerSec: number;
+}
+
+export interface MikrotikActivePPPoEUser {
+  id: string;
+  username: string;
+  name: string;
+  service: string;
+  callerId: string;
+  address: string;
+  ip: string;
+  mac?: string;
+  uptime: string;
+  encoding?: string;
+  sessionId?: string;
+  routerId?: string;
+  type: "pppoe";
+}
+
+export interface MikrotikActiveHotspotUser {
+  id: string;
+  username: string;
+  user: string;
+  address: string;
+  ip: string;
+  macAddress: string;
+  mac: string;
+  uptime: string;
+  bytesIn: number;
+  bytesOut: number;
+  packetsIn: number;
+  packetsOut: number;
+  sessionTimeLeft?: string;
+  routerId?: string;
+  type: "hotspot";
+}
+
+export interface MikrotikQueue {
+  id: string;
+  name: string;
+  target: string;
+  maxLimit: string;
+  rate: string;
+  rxBps: number;
+  txBps: number;
+  rxMbps: number;
+  txMbps: number;
+  bytes: string;
+  rxBytes: number;
+  txBytes: number;
+  packets: string;
+  disabled: boolean;
+}
+
+export interface InterfaceCounterSample {
+  timestamp: number;
+  rxBytes: number;
+  txBytes: number;
+  rxPackets: number;
+  txPackets: number;
+}
+
+export interface CalculatedRate {
+  rxBps: number;
+  txBps: number;
+  rxMbps: number;
+  txMbps: number;
+  rxPacketsPerSec: number;
+  txPacketsPerSec: number;
+}
+
+/**
+ * In-memory sample cache keyed by `${routerKey}:${interfaceName}`
+ */
+export const interfaceTrafficSamples = new Map<string, InterfaceCounterSample>();
+
+/**
+ * Resets traffic baseline when router or interface changes or on explicit command
+ */
+export function resetInterfaceTrafficBaseline(routerHost?: string): void {
+  if (!routerHost) {
+    interfaceTrafficSamples.clear();
+    return;
+  }
+  const prefix = `${sanitizeMikrotikHost(routerHost)}:`;
+  for (const key of interfaceTrafficSamples.keys()) {
+    if (key.startsWith(prefix)) {
+      interfaceTrafficSamples.delete(key);
+    }
+  }
+}
+
+/**
+ * Accurately calculates real-time bandwidth (Bps, Mbps, and Pps) from sample differences.
+ * Formula:
+ * rxBps = (currentRxBytes - previousRxBytes) / elapsedSeconds
+ * txBps = (currentTxBytes - previousTxBytes) / elapsedSeconds
+ * Mbps = bytesPerSecond * 8 / 1_000_000
+ */
+export function calculateInterfaceBandwidth(
+  current: {
+    rxBytes: number;
+    txBytes: number;
+    rxPackets?: number;
+    txPackets?: number;
+    timestamp?: number;
+  },
+  previous?: InterfaceCounterSample,
+  nowMs: number = Date.now(),
+): { rate: CalculatedRate; nextSample: InterfaceCounterSample } {
+  const currentRx =
+    typeof current.rxBytes === "number" && !isNaN(current.rxBytes)
+      ? Math.max(0, current.rxBytes)
+      : 0;
+  const currentTx =
+    typeof current.txBytes === "number" && !isNaN(current.txBytes)
+      ? Math.max(0, current.txBytes)
+      : 0;
+  const currentRxPkts =
+    typeof current.rxPackets === "number" && !isNaN(current.rxPackets)
+      ? Math.max(0, current.rxPackets)
+      : 0;
+  const currentTxPkts =
+    typeof current.txPackets === "number" && !isNaN(current.txPackets)
+      ? Math.max(0, current.txPackets)
+      : 0;
+
+  const currentSample: InterfaceCounterSample = {
+    timestamp: current.timestamp || nowMs,
+    rxBytes: currentRx,
+    txBytes: currentTx,
+    rxPackets: currentRxPkts,
+    txPackets: currentTxPkts,
+  };
+
+  // Requirement: First poll must show 0 because there is no previous sample
+  if (!previous) {
+    return {
+      rate: {
+        rxBps: 0,
+        txBps: 0,
+        rxMbps: 0,
+        txMbps: 0,
+        rxPacketsPerSec: 0,
+        txPacketsPerSec: 0,
+      },
+      nextSample: currentSample,
+    };
+  }
+
+  const elapsedMs = currentSample.timestamp - previous.timestamp;
+  const elapsedSeconds = elapsedMs / 1000;
+
+  // Handle elapsedSeconds <= 0 safely (no division by zero or negative time)
+  if (elapsedSeconds <= 0) {
+    return {
+      rate: {
+        rxBps: 0,
+        txBps: 0,
+        rxMbps: 0,
+        txMbps: 0,
+        rxPacketsPerSec: 0,
+        txPacketsPerSec: 0,
+      },
+      nextSample: currentSample,
+    };
+  }
+
+  // Handle counter reset or rollover safely:
+  // If current counter is smaller than previous (router rebooted, interface reset, or 32-bit counter wrap)
+  if (currentRx < previous.rxBytes || currentTx < previous.txBytes) {
+    return {
+      rate: {
+        rxBps: 0,
+        txBps: 0,
+        rxMbps: 0,
+        txMbps: 0,
+        rxPacketsPerSec: 0,
+        txPacketsPerSec: 0,
+      },
+      nextSample: currentSample,
+    };
+  }
+
+  const rxDiff = currentRx - previous.rxBytes;
+  const txDiff = currentTx - previous.txBytes;
+
+  const rxBps = Math.round(rxDiff / elapsedSeconds);
+  const txBps = Math.round(txDiff / elapsedSeconds);
+
+  // Correct conversion: Mbps = bytesPerSecond * 8 / 1_000_000
+  const rxMbps = parseFloat(((rxBps * 8) / 1_000_000).toFixed(3));
+  const txMbps = parseFloat(((txBps * 8) / 1_000_000).toFixed(3));
+
+  const rxPktDiff = Math.max(0, currentRxPkts - previous.rxPackets);
+  const txPktDiff = Math.max(0, currentTxPkts - previous.txPackets);
+  const rxPacketsPerSec = Math.round(rxPktDiff / elapsedSeconds);
+  const txPacketsPerSec = Math.round(txPktDiff / elapsedSeconds);
+
+  return {
+    rate: {
+      rxBps,
+      txBps,
+      rxMbps,
+      txMbps,
+      rxPacketsPerSec,
+      txPacketsPerSec,
+    },
+    nextSample: currentSample,
+  };
+}
+
 export function isMockModeAllowed(): boolean {
   if (process.env.NODE_ENV === "production") {
     return false;
@@ -900,6 +1142,7 @@ export function getSimulatedRouterOS6Info(
  */
 export async function executeMikrotikReboot(params: MikrotikConnParams): Promise<{
   success: boolean;
+  commandAccepted?: boolean;
   code?: MikrotikErrorCode;
   message?: string;
   error?: string;
@@ -907,6 +1150,7 @@ export async function executeMikrotikReboot(params: MikrotikConnParams): Promise
   if (!params.host) {
     return {
       success: false,
+      commandAccepted: false,
       code: "INVALID_CONFIGURATION",
       error: "Router IP/host is required for reboot operation",
     };
@@ -919,20 +1163,24 @@ export async function executeMikrotikReboot(params: MikrotikConnParams): Promise
   ) {
     return {
       success: true,
-      message: `[MOCK] Simulated reboot signal sent to MikroTik (${cleanHost})`,
+      commandAccepted: true,
+      message: `[MOCK] Reboot command accepted for simulated MikroTik (${cleanHost})`,
     };
   }
 
   try {
+    // Single execution without automatic retry (reboot is a destructive action)
     const res = await queryMikrotikSocket(params, ["/system/reboot"]);
     if (res.success) {
       return {
         success: true,
-        message: `Reboot command successfully sent and accepted by MikroTik (${cleanHost}). Router is restarting now.`,
+        commandAccepted: true,
+        message: `Reboot command accepted by MikroTik (${cleanHost}). Note: The router is restarting and will temporarily be offline.`,
       };
     }
 
     const errLower = (res.error || "").toLowerCase();
+    // When RouterOS accepts reboot, socket is instantly closed/reset by the router
     if (
       errLower.includes("econnreset") ||
       errLower.includes("socket closed") ||
@@ -940,6 +1188,7 @@ export async function executeMikrotikReboot(params: MikrotikConnParams): Promise
     ) {
       return {
         success: true,
+        commandAccepted: true,
         message: `Reboot command accepted by MikroTik (${cleanHost}). Socket disconnected as router restarted.`,
       };
     }
@@ -947,6 +1196,7 @@ export async function executeMikrotikReboot(params: MikrotikConnParams): Promise
     const classified = classifyMikrotikError(res.error || "");
     return {
       success: false,
+      commandAccepted: false,
       code: classified.code,
       error: classified.message,
     };
@@ -954,6 +1204,7 @@ export async function executeMikrotikReboot(params: MikrotikConnParams): Promise
     const classified = classifyMikrotikError(err.message);
     return {
       success: false,
+      commandAccepted: false,
       code: classified.code,
       error: classified.message,
     };
@@ -962,6 +1213,7 @@ export async function executeMikrotikReboot(params: MikrotikConnParams): Promise
 
 /**
  * Real MikroTik DNS and NAT Firewall Security Configuration
+ * Ensures idempotent rule application and strictly verifies configuration via read-back.
  */
 export async function configureMikrotikDns(
   params: MikrotikConnParams,
@@ -1033,15 +1285,15 @@ export async function configureMikrotikDns(
     };
   }
 
-  // 3. Configure Firewall NAT redirect rules for DNS (UDP & TCP port 53)
+  // 3. Configure Firewall NAT redirect rules for DNS (UDP & TCP port 53) idempotently
   if (redirectPort53) {
-    // Check UDP rule
+    // Check existing UDP rule
     const udpCheck = await queryMikrotikSocket(params, [
       "/ip/firewall/nat/print",
       "?comment=Nexora-DNS-Redirect-UDP",
     ]);
     let udpId = "";
-    if (udpCheck.success && udpCheck.sentences) {
+    if (udpCheck.success && udpCheck.sentences?.length) {
       for (const sent of udpCheck.sentences) {
         for (const w of sent) {
           if (w.startsWith("=.id=")) udpId = w.substring(5);
@@ -1061,20 +1313,24 @@ export async function configureMikrotikDns(
       if (subnet) addUdpWords.push(`=src-address=${subnet}`);
       await queryMikrotikSocket(params, addUdpWords);
     } else {
-      await queryMikrotikSocket(params, [
+      const setUdpWords = [
         "/ip/firewall/nat/set",
         `=.id=${udpId}`,
         "=disabled=no",
-      ]);
+        "=action=redirect",
+        "=to-ports=53",
+      ];
+      if (subnet) setUdpWords.push(`=src-address=${subnet}`);
+      await queryMikrotikSocket(params, setUdpWords);
     }
 
-    // Check TCP rule
+    // Check existing TCP rule
     const tcpCheck = await queryMikrotikSocket(params, [
       "/ip/firewall/nat/print",
       "?comment=Nexora-DNS-Redirect-TCP",
     ]);
     let tcpId = "";
-    if (tcpCheck.success && tcpCheck.sentences) {
+    if (tcpCheck.success && tcpCheck.sentences?.length) {
       for (const sent of tcpCheck.sentences) {
         for (const w of sent) {
           if (w.startsWith("=.id=")) tcpId = w.substring(5);
@@ -1094,11 +1350,15 @@ export async function configureMikrotikDns(
       if (subnet) addTcpWords.push(`=src-address=${subnet}`);
       await queryMikrotikSocket(params, addTcpWords);
     } else {
-      await queryMikrotikSocket(params, [
+      const setTcpWords = [
         "/ip/firewall/nat/set",
         `=.id=${tcpId}`,
         "=disabled=no",
-      ]);
+        "=action=redirect",
+        "=to-ports=53",
+      ];
+      if (subnet) setTcpWords.push(`=src-address=${subnet}`);
+      await queryMikrotikSocket(params, setTcpWords);
     }
   }
 
@@ -1119,14 +1379,45 @@ export async function configureMikrotikDns(
     }
   }
 
+  if (!verifiedServers || !verifiedRemote) {
+    return {
+      success: false,
+      code: "COMMAND_FAILED",
+      error: `DNS configuration verification failed: read-back from router did not match requested settings.`,
+    };
+  }
+
+  // Read back NAT rules if redirect was requested
+  if (redirectPort53) {
+    const verifyNat = await queryMikrotikSocket(params, [
+      "/ip/firewall/nat/print",
+      "?comment=Nexora-DNS-Redirect-UDP",
+    ]);
+    let natFound = false;
+    if (verifyNat.success && verifyNat.sentences?.length) {
+      for (const sent of verifyNat.sentences) {
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) natFound = true;
+        }
+      }
+    }
+    if (!natFound) {
+      return {
+        success: false,
+        code: "COMMAND_FAILED",
+        error: `NAT redirect rule verification failed: Nexora-DNS-Redirect-UDP rule not confirmed on router.`,
+      };
+    }
+  }
+
   return {
     success: true,
     currentDns: {
-      servers: verifiedServers || servers,
+      servers: verifiedServers,
       allowRemoteRequests: verifiedRemote,
     },
     firewallRulesConfigured: redirectPort53,
-    message: `DNS configuration successfully verified on router (${cleanHost}): ${verifiedServers || servers}`,
+    message: `DNS configuration successfully verified on router (${cleanHost}): ${verifiedServers}`,
   };
 }
 
@@ -1143,6 +1434,10 @@ export interface RealInterfaceTraffic {
   txErrors: number;
   rxBps: number;
   txBps: number;
+  rxMbps?: number;
+  txMbps?: number;
+  rxPacketsPerSec?: number;
+  txPacketsPerSec?: number;
 }
 
 export interface RealQueueTraffic {
@@ -1153,6 +1448,8 @@ export interface RealQueueTraffic {
   rate: string;
   rxBps: number;
   txBps: number;
+  rxMbps?: number;
+  txMbps?: number;
   bytes: string;
   rxBytes: number;
   txBytes: number;
@@ -1171,6 +1468,8 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
   queues: RealQueueTraffic[];
   totalRxBps: number;
   totalTxBps: number;
+  totalRxMbps?: number;
+  totalTxMbps?: number;
   error?: string;
 }> {
   if (!params.host) {
@@ -1182,6 +1481,8 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
       queues: [],
       totalRxBps: 0,
       totalTxBps: 0,
+      totalRxMbps: 0,
+      totalTxMbps: 0,
       error: "Router host is required",
     };
   }
@@ -1208,6 +1509,10 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
           txErrors: 0,
           rxBps: 45000000,
           txBps: 18000000,
+          rxMbps: 360,
+          txMbps: 144,
+          rxPacketsPerSec: 520,
+          txPacketsPerSec: 310,
         },
         {
           name: "ether2-lan",
@@ -1222,6 +1527,10 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
           txErrors: 0,
           rxBps: 34000000,
           txBps: 14000000,
+          rxMbps: 272,
+          txMbps: 112,
+          rxPacketsPerSec: 410,
+          txPacketsPerSec: 220,
         },
         {
           name: "ether3-hotspot",
@@ -1236,6 +1545,10 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
           txErrors: 0,
           rxBps: 12000000,
           txBps: 4000000,
+          rxMbps: 96,
+          txMbps: 32,
+          rxPacketsPerSec: 150,
+          txPacketsPerSec: 75,
         },
       ],
       queues: [
@@ -1247,6 +1560,8 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
           rate: "120000/350000",
           rxBps: 120000,
           txBps: 350000,
+          rxMbps: 0.96,
+          txMbps: 2.8,
           bytes: "2819230/19283019",
           rxBytes: 2819230,
           txBytes: 19283019,
@@ -1256,6 +1571,8 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
       ],
       totalRxBps: 45000000,
       totalTxBps: 18000000,
+      totalRxMbps: 360,
+      totalTxMbps: 144,
     };
   }
 
@@ -1276,10 +1593,13 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
       queues: [],
       totalRxBps: 0,
       totalTxBps: 0,
+      totalRxMbps: 0,
+      totalTxMbps: 0,
       error: classified.message,
     };
   }
 
+  const nowMs = Date.now();
   const interfaces: RealInterfaceTraffic[] = [];
   if (ifRes.sentences) {
     for (const sent of ifRes.sentences) {
@@ -1314,6 +1634,16 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
       }
 
       if (name) {
+        // Calculate live rates from counter differences
+        const sampleKey = `${cleanHost}:${name}`;
+        const prevSample = interfaceTrafficSamples.get(sampleKey);
+        const { rate, nextSample } = calculateInterfaceBandwidth(
+          { rxBytes, txBytes, rxPackets, txPackets },
+          prevSample,
+          nowMs,
+        );
+        interfaceTrafficSamples.set(sampleKey, nextSample);
+
         interfaces.push({
           name,
           type,
@@ -1325,8 +1655,12 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
           txPackets,
           rxErrors,
           txErrors,
-          rxBps: 0,
-          txBps: 0,
+          rxBps: rate.rxBps,
+          txBps: rate.txBps,
+          rxMbps: rate.rxMbps,
+          txMbps: rate.txMbps,
+          rxPacketsPerSec: rate.rxPacketsPerSec,
+          txPacketsPerSec: rate.txPacketsPerSec,
         });
       }
     }
@@ -1360,17 +1694,43 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
       if (name) {
         const [rxRateStr, txRateStr] = rate.split("/");
         const [rxByteStr, txByteStr] = bytes.split("/");
+        const qRxBytes = parseInt(rxByteStr, 10) || 0;
+        const qTxBytes = parseInt(txByteStr, 10) || 0;
+        let qRxBps = parseInt(rxRateStr, 10) || 0;
+        let qTxBps = parseInt(txRateStr, 10) || 0;
+
+        // If RouterOS reported 0/0 rate, calculate from counter differences
+        const queueSampleKey = `${cleanHost}:queue:${name}`;
+        const prevQueueSample = interfaceTrafficSamples.get(queueSampleKey);
+        const { rate: calculatedQueueRate, nextSample: nextQueueSample } =
+          calculateInterfaceBandwidth(
+            { rxBytes: qRxBytes, txBytes: qTxBytes },
+            prevQueueSample,
+            nowMs,
+          );
+        interfaceTrafficSamples.set(queueSampleKey, nextQueueSample);
+
+        if (qRxBps === 0 && qTxBps === 0 && prevQueueSample) {
+          qRxBps = calculatedQueueRate.rxBps;
+          qTxBps = calculatedQueueRate.txBps;
+        }
+
+        const qRxMbps = parseFloat(((qRxBps * 8) / 1_000_000).toFixed(3));
+        const qTxMbps = parseFloat(((qTxBps * 8) / 1_000_000).toFixed(3));
+
         queues.push({
           id,
           name,
           target,
           maxLimit,
-          rate,
-          rxBps: parseInt(rxRateStr, 10) || 0,
-          txBps: parseInt(txRateStr, 10) || 0,
+          rate: `${qRxBps}/${qTxBps}`,
+          rxBps: qRxBps,
+          txBps: qTxBps,
+          rxMbps: qRxMbps,
+          txMbps: qTxMbps,
           bytes,
-          rxBytes: parseInt(rxByteStr, 10) || 0,
-          txBytes: parseInt(txByteStr, 10) || 0,
+          rxBytes: qRxBytes,
+          txBytes: qTxBytes,
           packets,
           disabled,
         });
@@ -1378,12 +1738,18 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
     }
   }
 
+  // Calculate aggregate live bandwidth across active running interfaces
   let totalRxBps = 0;
   let totalTxBps = 0;
-  for (const q of queues) {
-    totalRxBps += q.rxBps;
-    totalTxBps += q.txBps;
+  for (const iface of interfaces) {
+    if (iface.running && !iface.disabled) {
+      totalRxBps += iface.rxBps;
+      totalTxBps += iface.txBps;
+    }
   }
+
+  const totalRxMbps = parseFloat(((totalRxBps * 8) / 1_000_000).toFixed(3));
+  const totalTxMbps = parseFloat(((totalTxBps * 8) / 1_000_000).toFixed(3));
 
   return {
     success: true,
@@ -1392,6 +1758,8 @@ export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<
     queues,
     totalRxBps,
     totalTxBps,
+    totalRxMbps,
+    totalTxMbps,
   };
 }
 
@@ -1419,6 +1787,13 @@ export interface ActiveHotspotUser {
   packetsOut: number;
   sessionTimeLeft?: string;
   type: "hotspot";
+}
+
+export const MAC_REGEX = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+
+export function isValidMacAddress(val?: string): boolean {
+  if (!val || typeof val !== "string") return false;
+  return MAC_REGEX.test(val.trim());
 }
 
 /**
@@ -1650,20 +2025,29 @@ export async function fetchMikrotikActiveUsers(params: MikrotikConnParams): Prom
 
   const combined = [
     ...pppoeUsers.map((p) => ({
+      username: p.name,
       userId: p.name,
       ip: p.address,
       uptime: p.uptime,
-      mac: p.callerId,
+      mac: isValidMacAddress(p.callerId) ? p.callerId : undefined,
+      service: p.service,
+      callerId: p.callerId,
+      sessionId: p.sessionId,
+      routerId: cleanHost,
       type: "pppoe" as const,
     })),
     ...hotspotUsers.map((h) => ({
+      username: h.user,
       userId: h.user,
       ip: h.address,
       uptime: h.uptime,
-      mac: h.macAddress,
-      type: "hotspot" as const,
+      mac: isValidMacAddress(h.macAddress) ? h.macAddress : undefined,
       bytesIn: h.bytesIn,
       bytesOut: h.bytesOut,
+      packetsIn: h.packetsIn,
+      packetsOut: h.packetsOut,
+      routerId: cleanHost,
+      type: "hotspot" as const,
     })),
   ];
 
@@ -1685,6 +2069,45 @@ export function isValidIpOrCidr(val: string): boolean {
   const ipv4Regex =
     /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\/(?:3[0-2]|[12]?[0-9]))?$/;
   return ipv4Regex.test(trimmed);
+}
+
+/**
+ * Validates that a simple queue target is a valid IP or Subnet (e.g. 192.168.1.50/32 or 192.168.1.0/24)
+ * and strictly rejects usernames, internal database IDs, or empty values.
+ */
+export function isValidQueueTarget(target: string): boolean {
+  if (!target || typeof target !== "string") return false;
+  const trimmed = target.trim();
+  if (
+    trimmed.startsWith("cli_") ||
+    trimmed.startsWith("user_") ||
+    !trimmed.includes(".")
+  ) {
+    return false;
+  }
+  return isValidIpOrCidr(trimmed);
+}
+
+/**
+ * Resolves a valid target IP/Subnet from client data or returns null
+ */
+export function buildValidQueueTarget(client: any): string | null {
+  if (!client) return null;
+  const candidate = (
+    client.ipAddress ||
+    client.ip ||
+    client.staticIp ||
+    client.target ||
+    ""
+  ).trim();
+
+  if (isValidIpOrCidr(candidate)) {
+    return candidate.includes("/") ? candidate : `${candidate}/32`;
+  }
+  if (client.subnet && isValidIpOrCidr(client.subnet.trim())) {
+    return client.subnet.trim();
+  }
+  return null;
 }
 
 /**
@@ -1717,29 +2140,20 @@ export async function syncMikrotikClientQueue(
     isMockModeAllowed() &&
     (params.isDemo || cleanHost === "demo.mikrotik.local")
   ) {
+    const mockTarget = buildValidQueueTarget(client) || "192.168.88.100/32";
     return {
       success: true,
       queueId: "*mock_q1",
-      targetUsed: client.ipAddress || "192.168.88.100/32",
+      targetUsed: mockTarget,
       verifiedLimit: speedLimit,
       message: `[MOCK] Simple Queue synced for ${client.userId} (${speedLimit})`,
     };
   }
 
-  // 1. Resolve a VALID target IP/subnet. DO NOT use client.userId!
-  let resolvedTarget = "";
-  const candidateIp = (
-    client.ipAddress ||
-    client.ip ||
-    client.staticIp ||
-    ""
-  ).trim();
+  // 1. Resolve a VALID target IP/subnet using buildValidQueueTarget
+  let resolvedTarget = buildValidQueueTarget(client);
 
-  if (isValidIpOrCidr(candidateIp)) {
-    resolvedTarget = candidateIp.includes("/")
-      ? candidateIp
-      : `${candidateIp}/32`;
-  } else {
+  if (!resolvedTarget) {
     // If no static IP on client record, probe active sessions on router to find their live IP
     try {
       const activeCheck = await queryMikrotikSocket(params, [
@@ -1782,18 +2196,13 @@ export async function syncMikrotikClientQueue(
     }
   }
 
-  // If still no valid target found, we cannot create an invalid queue with username target
-  if (!resolvedTarget) {
-    // Check if client has a MAC address or assigned subnet
-    if (client.subnet && isValidIpOrCidr(client.subnet)) {
-      resolvedTarget = client.subnet;
-    } else {
-      return {
-        success: false,
-        code: "INVALID_TARGET",
-        error: `Cannot create Simple Queue for client "${client.userId}": No valid IP address or subnet target found. Ensure client has a static IP or is actively connected.`,
-      };
-    }
+  // If still no valid target found, reject immediately: DO NOT create a queue with username target
+  if (!resolvedTarget || !isValidQueueTarget(resolvedTarget)) {
+    return {
+      success: false,
+      code: "INVALID_TARGET",
+      error: `Cannot create simple queue: no valid IP/subnet target resolved for client "${client.userId}". Ensure client has a valid IP assigned or is connected.`,
+    };
   }
 
   const queueName = `nexora_${client.userId}`;
@@ -1867,23 +2276,49 @@ export async function syncMikrotikClientQueue(
     };
   }
 
-  // Read back to confirm that limits match on RouterOS
+  // Read back to confirm that queue exists and limits match on RouterOS
   const verifyQueue = await queryMikrotikSocket(params, [
     "/queue/simple/print",
-    `?target=${resolvedTarget}`,
+    `?name=${queueName}`,
   ]);
   let verifiedLimit = "";
-  if (verifyQueue.success && verifyQueue.sentences) {
+  let verifiedFound = false;
+  if (verifyQueue.success && verifyQueue.sentences?.length) {
     for (const sent of verifyQueue.sentences) {
       for (const w of sent) {
+        if (w.startsWith("=.id=")) verifiedFound = true;
         if (w.startsWith("=max-limit=")) verifiedLimit = w.substring(11);
       }
     }
   }
 
+  if (!verifiedFound) {
+    // Also try checking target readback
+    const verifyTarget = await queryMikrotikSocket(params, [
+      "/queue/simple/print",
+      `?target=${resolvedTarget}`,
+    ]);
+    if (verifyTarget.success && verifyTarget.sentences?.length) {
+      for (const sent of verifyTarget.sentences) {
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) verifiedFound = true;
+          if (w.startsWith("=max-limit=")) verifiedLimit = w.substring(11);
+        }
+      }
+    }
+  }
+
+  if (!verifiedFound) {
+    return {
+      success: false,
+      code: "COMMAND_FAILED",
+      error: `Simple Queue verification failed: queue "${queueName}" could not be confirmed on RouterOS.`,
+    };
+  }
+
   return {
     success: true,
-    queueId: qId || "new",
+    queueId: qId || "verified",
     targetUsed: resolvedTarget,
     verifiedLimit: verifiedLimit || speedLimit,
     message: `Simple Queue active on MikroTik for ${client.userId} [Target: ${resolvedTarget}, Limit: ${speedLimit}]`,

@@ -608,54 +608,86 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     const maxUl = Math.max(2, parseFloat(activeClient.uploadSpeed || "5"));
     const isOnline = activeClient.status === "online";
 
-    // Initial fill
+    // Initial fill - clean 0.0 baseline
     const initialPoints: { dl: number; ul: number }[] = [];
     for (let i = 0; i < 20; i++) {
-      if (isOnline) {
-        initialPoints.push({
-          dl: parseFloat((maxDl * (0.4 + Math.random() * 0.5)).toFixed(1)),
-          ul: parseFloat((maxUl * (0.3 + Math.random() * 0.4)).toFixed(1)),
-        });
-      } else {
-        initialPoints.push({ dl: 0.0, ul: 0.0 });
-      }
+      initialPoints.push({ dl: 0.0, ul: 0.0 });
     }
     setLiveData(initialPoints);
-    setCurrentSpeedMbps({
-      dl: isOnline ? parseFloat((maxDl * 0.72).toFixed(1)) : 0.0,
-      ul: isOnline ? parseFloat((maxUl * 0.55).toFixed(1)) : 0.0,
-    });
+    setCurrentSpeedMbps({ dl: 0.0, ul: 0.0 });
 
-    const interval = setInterval(() => {
+    if (!isOnline) return;
+
+    let isMounted = true;
+
+    const pollClientTraffic = async () => {
+      let dl = 0.0;
+      let ul = 0.0;
+
+      try {
+        let savedRouter: any = null;
+        try {
+          const raw = localStorage.getItem("fe_mikrotik_config");
+          if (raw) savedRouter = JSON.parse(raw);
+        } catch {}
+
+        if (savedRouter?.ip && savedRouter?.connected) {
+          const res = await fetch("/api/mikrotik/traffic", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              router: {
+                ip: savedRouter.ip,
+                apiPort: Number(savedRouter.port) || 8728,
+                username: savedRouter.user || savedRouter.username || "admin",
+                password: savedRouter.password || "",
+                connected: true,
+                isDemo: savedRouter.isDemo,
+              },
+            }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && Array.isArray(data.queues)) {
+              const q = data.queues.find(
+                (item: any) =>
+                  item.name === `nexora_${activeClient.userId}` ||
+                  item.name === activeClient.userId ||
+                  (activeClient.ipAddress && item.target?.includes(activeClient.ipAddress)),
+              );
+              if (q) {
+                dl = Number(q.rxMbps) || (Number(q.rxBps) || 0) / 1000000;
+                ul = Number(q.txMbps) || (Number(q.txBps) || 0) / 1000000;
+              }
+            }
+          }
+        }
+      } catch {}
+
+      if (!isMounted) return;
+
+      const boundedDl = parseFloat(Math.min(maxDl, Math.max(0.0, dl)).toFixed(1));
+      const boundedUl = parseFloat(Math.min(maxUl, Math.max(0.0, ul)).toFixed(1));
+
+      setCurrentSpeedMbps({ dl: boundedDl, ul: boundedUl });
       setLiveData((prev) => {
         const newData = [...prev.slice(-19)];
-        if (activeClient.status === "online") {
-          const curDl = parseFloat(
-            (
-              maxDl *
-              (0.45 + Math.sin(Date.now() / 3000) * 0.35 + Math.random() * 0.15)
-            ).toFixed(1),
-          );
-          const curUl = parseFloat(
-            (
-              maxUl *
-              (0.35 + Math.cos(Date.now() / 3000) * 0.25 + Math.random() * 0.15)
-            ).toFixed(1),
-          );
-          const boundedDl = Math.max(0.1, Math.min(maxDl, curDl));
-          const boundedUl = Math.max(0.1, Math.min(maxUl, curUl));
-          setCurrentSpeedMbps({ dl: boundedDl, ul: boundedUl });
-          newData.push({ dl: boundedDl, ul: boundedUl });
-        } else {
-          // Strictly 0.0 Mbps when offline
-          setCurrentSpeedMbps({ dl: 0.0, ul: 0.0 });
-          newData.push({ dl: 0.0, ul: 0.0 });
-        }
+        newData.push({ dl: boundedDl, ul: boundedUl });
         return newData;
       });
-    }, 1500);
-    return () => clearInterval(interval);
+    };
+
+    pollClientTraffic();
+    const interval = setInterval(pollClientTraffic, 2000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [
+    activeClient.userId,
+    activeClient.ipAddress,
     activeClient.status,
     activeClient.downloadSpeed,
     activeClient.uploadSpeed,
@@ -676,7 +708,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     setTimeout(() => {
       addLog("Connecting to Gateway Router (nexora-network-gw)...");
       if (isOnline) {
-        setPingLatency(Math.floor(Math.random() * 4) + 2);
+        setPingLatency(3);
       } else {
         setPingLatency(0);
       }
@@ -685,7 +717,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     setTimeout(() => {
       addLog("Sending ICMP Echo packets to local ONU device...");
       if (isOnline) {
-        setSignalPower(parseFloat((-17.0 - Math.random() * 3).toFixed(2)));
+        setSignalPower(-18.5);
         setPacketLoss(0);
       } else {
         setSignalPower(-38.5);

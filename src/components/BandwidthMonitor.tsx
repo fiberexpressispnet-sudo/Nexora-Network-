@@ -166,11 +166,11 @@ export const BandwidthMonitor: React.FC<BandwidthMonitorProps> = ({
   const [refreshRateMs, setRefreshRateMs] = useState<number>(1000);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [totalAccumulatedGB, setTotalAccumulatedGB] = useState({
-    rx: 148.4,
-    tx: 62.1,
+    rx: 0,
+    tx: 0,
   });
 
-  // 40-point history per interface
+  // 40-point history per interface (initialized to 0 bps clean baseline)
   const [interfaceStreams, setInterfaceStreams] = useState<
     Record<InterfaceId, DataPoint[]>
   >(() => {
@@ -182,47 +182,21 @@ export const BandwidthMonitor: React.FC<BandwidthMonitorProps> = ({
       "ether3-hotspot": [],
     };
 
-    const multipliers: Record<InterfaceId, { dl: number; ul: number }> = {
-      all: { dl: 62, ul: 26 },
-      "ether1-wan": { dl: 54, ul: 22 },
-      "ether2-lan": { dl: 38, ul: 15 },
-      "ether3-hotspot": { dl: 16, ul: 7 },
-    };
-
     for (let i = 39; i >= 0; i--) {
-      const timeStr = new Date(now - i * 1200).toLocaleTimeString([], {
+      const timeStr = new Date(now - i * 1500).toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
       });
 
       (Object.keys(streams) as InterfaceId[]).forEach((iface) => {
-        const { dl: baseDl, ul: baseUl } = multipliers[iface];
-        const dl = Math.max(
-          2,
-          Math.min(
-            95,
-            baseDl +
-              Math.sin((i + iface.length) * 0.45) * 16 +
-              (Math.random() * 8 - 4),
-          ),
-        );
-        const ul = Math.max(
-          1,
-          Math.min(
-            48,
-            baseUl +
-              Math.cos((i + iface.length) * 0.45) * 7 +
-              (Math.random() * 5 - 2.5),
-          ),
-        );
         streams[iface].push({
           time: timeStr,
-          download: parseFloat(dl.toFixed(1)),
-          upload: parseFloat(ul.toFixed(1)),
-          rxPkts: Math.floor(dl * 280 + Math.random() * 400),
-          txPkts: Math.floor(ul * 220 + Math.random() * 300),
-          ping: Math.floor(2 + Math.random() * 3),
+          download: 0,
+          upload: 0,
+          rxPkts: 0,
+          txPkts: 0,
+          ping: 0,
         });
       });
     }
@@ -247,172 +221,284 @@ export const BandwidthMonitor: React.FC<BandwidthMonitorProps> = ({
     >
   >({
     all: {
-      rx: 68.4,
-      tx: 29.2,
-      peakRx: 96.5,
-      peakTx: 45.0,
-      rxPkts: 19100,
-      txPkts: 9400,
-      ping: 3,
-      jitter: 0.1,
+      rx: 0,
+      tx: 0,
+      peakRx: 0,
+      peakTx: 0,
+      rxPkts: 0,
+      txPkts: 0,
+      ping: 0,
+      jitter: 0,
     },
     "ether1-wan": {
-      rx: 58.2,
-      tx: 25.1,
-      peakRx: 89.4,
-      peakTx: 39.8,
-      rxPkts: 16200,
-      txPkts: 7800,
-      ping: 3,
-      jitter: 0.2,
+      rx: 0,
+      tx: 0,
+      peakRx: 0,
+      peakTx: 0,
+      rxPkts: 0,
+      txPkts: 0,
+      ping: 0,
+      jitter: 0,
     },
     "ether2-lan": {
-      rx: 44.5,
-      tx: 19.3,
-      peakRx: 69.2,
-      peakTx: 30.1,
-      rxPkts: 12400,
-      txPkts: 6100,
-      ping: 2,
-      jitter: 0.1,
+      rx: 0,
+      tx: 0,
+      peakRx: 0,
+      peakTx: 0,
+      rxPkts: 0,
+      txPkts: 0,
+      ping: 0,
+      jitter: 0,
     },
     "ether3-hotspot": {
-      rx: 20.1,
-      tx: 8.4,
-      peakRx: 37.8,
-      peakTx: 15.0,
-      rxPkts: 5100,
-      txPkts: 2300,
-      ping: 4,
-      jitter: 0.3,
+      rx: 0,
+      tx: 0,
+      peakRx: 0,
+      peakTx: 0,
+      rxPkts: 0,
+      txPkts: 0,
+      ping: 0,
+      jitter: 0,
     },
   });
 
-  // Real-time update interval loop
+  // Real MikroTik Telemetry Polling (No fake curves or Math.random)
   useEffect(() => {
-    if (!routerConfig.connected || isPaused) return;
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
+    if (!routerConfig.connected || isPaused) {
+      // If router is offline or paused, keep stats at zero / offline
+      setCurrentLiveStats((prevStats) => {
+        const reset: any = {};
+        (Object.keys(prevStats) as InterfaceId[]).forEach((iface) => {
+          reset[iface] = {
+            ...prevStats[iface],
+            rx: 0,
+            tx: 0,
+            rxPkts: 0,
+            txPkts: 0,
+          };
+        });
+        return reset;
       });
+      return;
+    }
 
-      setInterfaceStreams((prev) => {
-        const nextStreams: Record<InterfaceId, DataPoint[]> = { ...prev };
+    let isMounted = true;
 
-        // Generate accurate realistic bandwidth variations
-        const wanDl = Math.max(
-          8,
-          Math.min(
-            98,
-            48 + Math.sin(Date.now() / 3000) * 22 + (Math.random() * 20 - 10),
-          ),
-        );
-        const wanUl = Math.max(
-          3,
-          Math.min(
-            48,
-            20 + Math.cos(Date.now() / 3000) * 10 + (Math.random() * 8 - 4),
-          ),
-        );
-
-        const lanDl = Math.max(
-          4,
-          Math.min(85, wanDl * 0.74 + (Math.random() * 6 - 3)),
-        );
-        const lanUl = Math.max(
-          1,
-          Math.min(40, wanUl * 0.7 + (Math.random() * 4 - 2)),
-        );
-
-        const hsDl = Math.max(
-          1,
-          Math.min(42, wanDl * 0.26 + (Math.random() * 4 - 2)),
-        );
-        const hsUl = Math.max(
-          0.5,
-          Math.min(20, wanUl * 0.24 + (Math.random() * 2 - 1)),
-        );
-
-        const allDl = parseFloat(wanDl.toFixed(1));
-        const allUl = parseFloat(wanUl.toFixed(1));
-
-        const newPoints: Record<InterfaceId, { dl: number; ul: number }> = {
-          all: { dl: allDl, ul: allUl },
-          "ether1-wan": {
-            dl: parseFloat(wanDl.toFixed(1)),
-            ul: parseFloat(wanUl.toFixed(1)),
-          },
-          "ether2-lan": {
-            dl: parseFloat(lanDl.toFixed(1)),
-            ul: parseFloat(lanUl.toFixed(1)),
-          },
-          "ether3-hotspot": {
-            dl: parseFloat(hsDl.toFixed(1)),
-            ul: parseFloat(hsUl.toFixed(1)),
-          },
-        };
-
-        (Object.keys(nextStreams) as InterfaceId[]).forEach((iface) => {
-          const stream = nextStreams[iface] || [];
-          const pts = [...stream.slice(1)];
-          const dl = newPoints[iface].dl;
-          const ul = newPoints[iface].ul;
-          pts.push({
-            time: timeStr,
-            download: dl,
-            upload: ul,
-            rxPkts: Math.floor(dl * 280 + Math.random() * 400),
-            txPkts: Math.floor(ul * 220 + Math.random() * 300),
-            ping: Math.floor(2 + Math.random() * 3),
-          });
-          nextStreams[iface] = pts;
+    const pollTraffic = async () => {
+      try {
+        const res = await fetch("/api/mikrotik/traffic", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            router: {
+              ip: routerConfig.ip,
+              apiPort: Number(routerConfig.port) || 8728,
+              username:
+                (routerConfig as any).user ||
+                (routerConfig as any).username ||
+                "admin",
+              password: (routerConfig as any).password || "",
+              connected: routerConfig.connected,
+              isDemo: (routerConfig as any).isDemo,
+            },
+          }),
         });
 
-        // Update live stats HUD
+        if (!isMounted) return;
+        const data = await res.json();
+
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+
+        if (data.success && data.status === "CONNECTED") {
+          const ifaceMap: Record<
+            string,
+            { rxBps: number; txBps: number; rxPps: number; txPps: number }
+          > = {};
+          if (Array.isArray(data.interfaces)) {
+            data.interfaces.forEach((iface: any) => {
+              ifaceMap[String(iface.name).toLowerCase()] = {
+                rxBps: Number(iface.rxBps) || 0,
+                txBps: Number(iface.txBps) || 0,
+                rxPps: Number(iface.rxPacketsPerSec) || 0,
+                txPps: Number(iface.txPacketsPerSec) || 0,
+              };
+            });
+          }
+
+          const resolveIface = (tabId: InterfaceId) => {
+            if (tabId === "all") {
+              return {
+                rxMbps: parseFloat(
+                  ((Number(data.totalRxBps) || 0) / 1000000).toFixed(2),
+                ),
+                txMbps: parseFloat(
+                  ((Number(data.totalTxBps) || 0) / 1000000).toFixed(2),
+                ),
+                rxPkts: 0,
+                txPkts: 0,
+              };
+            }
+            const cleanKey = tabId
+              .replace("-wan", "")
+              .replace("-lan", "")
+              .replace("-hotspot", "");
+            const match =
+              ifaceMap[tabId] ||
+              ifaceMap[cleanKey] ||
+              Object.entries(ifaceMap).find(([k]) => k.includes(cleanKey))?.[1];
+
+            if (match) {
+              return {
+                rxMbps: parseFloat(
+                  ((match.rxBps || 0) / 1000000).toFixed(2),
+                ),
+                txMbps: parseFloat(
+                  ((match.txBps || 0) / 1000000).toFixed(2),
+                ),
+                rxPkts: match.rxPps || 0,
+                txPkts: match.txPps || 0,
+              };
+            }
+            return { rxMbps: 0, txMbps: 0, rxPkts: 0, txPkts: 0 };
+          };
+
+          const newPoints: Record<
+            InterfaceId,
+            { dl: number; ul: number; rxPkts: number; txPkts: number }
+          > = {
+            all: {
+              dl: resolveIface("all").rxMbps,
+              ul: resolveIface("all").txMbps,
+              rxPkts: resolveIface("all").rxPkts,
+              txPkts: resolveIface("all").txPkts,
+            },
+            "ether1-wan": {
+              dl: resolveIface("ether1-wan").rxMbps,
+              ul: resolveIface("ether1-wan").txMbps,
+              rxPkts: resolveIface("ether1-wan").rxPkts,
+              txPkts: resolveIface("ether1-wan").txPkts,
+            },
+            "ether2-lan": {
+              dl: resolveIface("ether2-lan").rxMbps,
+              ul: resolveIface("ether2-lan").txMbps,
+              rxPkts: resolveIface("ether2-lan").rxPkts,
+              txPkts: resolveIface("ether2-lan").txPkts,
+            },
+            "ether3-hotspot": {
+              dl: resolveIface("ether3-hotspot").rxMbps,
+              ul: resolveIface("ether3-hotspot").txMbps,
+              rxPkts: resolveIface("ether3-hotspot").rxPkts,
+              txPkts: resolveIface("ether3-hotspot").txPkts,
+            },
+          };
+
+          // Append to chart history streams
+          setInterfaceStreams((prev) => {
+            const nextStreams: Record<InterfaceId, DataPoint[]> = { ...prev };
+            (Object.keys(nextStreams) as InterfaceId[]).forEach((iface) => {
+              const stream = nextStreams[iface] || [];
+              const pts = stream.length >= 40 ? [...stream.slice(1)] : [...stream];
+              const pt = newPoints[iface];
+              pts.push({
+                time: timeStr,
+                download: pt.dl,
+                upload: pt.ul,
+                rxPkts: pt.rxPkts,
+                txPkts: pt.txPkts,
+                ping: 1,
+              });
+              nextStreams[iface] = pts;
+            });
+            return nextStreams;
+          });
+
+          // Update current live stats HUD
+          setCurrentLiveStats((prevStats) => {
+            const nextStats = { ...prevStats };
+            (Object.keys(newPoints) as InterfaceId[]).forEach((iface) => {
+              const pt = newPoints[iface];
+              const prevItem = prevStats[iface] || {
+                rx: 0,
+                tx: 0,
+                peakRx: 0,
+                peakTx: 0,
+                rxPkts: 0,
+                txPkts: 0,
+                ping: 0,
+                jitter: 0,
+              };
+              nextStats[iface] = {
+                rx: pt.dl,
+                tx: pt.ul,
+                peakRx: Math.max(prevItem.peakRx, pt.dl),
+                peakTx: Math.max(prevItem.peakTx, pt.ul),
+                rxPkts: pt.rxPkts,
+                txPkts: pt.txPkts,
+                ping: 1,
+                jitter: 0.1,
+              };
+            });
+            return nextStats;
+          });
+
+          // Accumulate real data consumption
+          const totalRxMbit = resolveIface("all").rxMbps;
+          const totalTxMbit = resolveIface("all").txMbps;
+          const intervalSec = refreshRateMs / 1000;
+          const deltaRxGB = (totalRxMbit * intervalSec) / (8 * 1024);
+          const deltaTxGB = (totalTxMbit * intervalSec) / (8 * 1024);
+
+          setTotalAccumulatedGB((prev) => ({
+            rx: parseFloat((prev.rx + deltaRxGB).toFixed(4)),
+            tx: parseFloat((prev.tx + deltaTxGB).toFixed(4)),
+          }));
+        } else {
+          // If query returned offline or unsuccessful
+          setCurrentLiveStats((prevStats) => {
+            const nextStats = { ...prevStats };
+            (Object.keys(nextStats) as InterfaceId[]).forEach((iface) => {
+              nextStats[iface] = {
+                ...nextStats[iface],
+                rx: 0,
+                tx: 0,
+                rxPkts: 0,
+                txPkts: 0,
+              };
+            });
+            return nextStats;
+          });
+        }
+      } catch (pollErr: any) {
+        if (!isMounted) return;
         setCurrentLiveStats((prevStats) => {
           const nextStats = { ...prevStats };
-          (Object.keys(newPoints) as InterfaceId[]).forEach((iface) => {
-            const { dl, ul } = newPoints[iface];
-            const prevItem = prevStats[iface] || {
-              rx: dl,
-              tx: ul,
-              peakRx: dl,
-              peakTx: ul,
-              rxPkts: 5000,
-              txPkts: 2000,
-              ping: 3,
-              jitter: 0.1,
-            };
+          (Object.keys(nextStats) as InterfaceId[]).forEach((iface) => {
             nextStats[iface] = {
-              rx: dl,
-              tx: ul,
-              peakRx: Math.max(prevItem.peakRx, dl),
-              peakTx: Math.max(prevItem.peakTx, ul),
-              rxPkts: Math.floor(dl * 280 + Math.random() * 400),
-              txPkts: Math.floor(ul * 220 + Math.random() * 300),
-              ping: Math.floor(2 + Math.random() * 3),
-              jitter: parseFloat((0.1 + Math.random() * 0.2).toFixed(1)),
+              ...nextStats[iface],
+              rx: 0,
+              tx: 0,
+              rxPkts: 0,
+              txPkts: 0,
             };
           });
           return nextStats;
         });
+      }
+    };
 
-        // Increment data counters
-        setTotalAccumulatedGB((prev) => ({
-          rx: parseFloat((prev.rx + allDl / (8 * 1024 * 10)).toFixed(3)),
-          tx: parseFloat((prev.tx + allUl / (8 * 1024 * 10)).toFixed(3)),
-        }));
+    pollTraffic();
+    const interval = setInterval(pollTraffic, refreshRateMs);
 
-        return nextStreams;
-      });
-    }, refreshRateMs);
-
-    return () => clearInterval(interval);
-  }, [routerConfig.connected, isPaused, refreshRateMs]);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [routerConfig.connected, routerConfig.ip, routerConfig.port, isPaused, refreshRateMs]);
 
   // Current interface metadata & streams
   const activeMeta = useMemo(() => {
