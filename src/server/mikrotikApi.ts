@@ -79,7 +79,9 @@ export type MikrotikErrorCode =
   | "PERMISSION_DENIED"
   | "INVALID_TARGET"
   | "UNSUPPORTED_OPERATION"
-  | "INVALID_CONFIGURATION";
+  | "INVALID_CONFIGURATION"
+  | "DNS_TCP_NAT_VERIFICATION_FAILED"
+  | "DNS_UDP_NAT_VERIFICATION_FAILED";
 
 export interface MikrotikError {
   code: MikrotikErrorCode;
@@ -335,6 +337,18 @@ export function classifyMikrotikError(
   socketErrCode?: string,
 ): { code: MikrotikErrorCode; message: string } {
   const lower = (errMessage || "").toLowerCase();
+  if (lower.includes("dns tcp nat") || lower.includes("tcp nat redirect")) {
+    return {
+      code: "DNS_TCP_NAT_VERIFICATION_FAILED",
+      message: errMessage || "DNS TCP NAT redirect rule verification failed on RouterOS.",
+    };
+  }
+  if (lower.includes("dns udp nat") || lower.includes("udp nat redirect")) {
+    return {
+      code: "DNS_UDP_NAT_VERIFICATION_FAILED",
+      message: errMessage || "DNS UDP NAT redirect rule verification failed on RouterOS.",
+    };
+  }
   if (
     socketErrCode === "ECONNREFUSED" ||
     lower.includes("econnrefused") ||
@@ -1223,17 +1237,22 @@ export async function configureMikrotikDns(
   subnet?: string,
 ): Promise<{
   success: boolean;
-  code?: MikrotikErrorCode;
+  code?: MikrotikErrorCode | string;
   currentDns?: { servers: string; allowRemoteRequests: boolean };
   firewallRulesConfigured?: boolean;
+  udpVerified?: boolean;
+  tcpVerified?: boolean;
   message?: string;
-  error?: string;
+  error?: { code: string; message: string } | string;
 }> {
   if (!params.host) {
     return {
       success: false,
       code: "INVALID_CONFIGURATION",
-      error: "Router IP is required",
+      error: {
+        code: "INVALID_CONFIGURATION",
+        message: "Router IP is required",
+      },
     };
   }
 
@@ -1249,6 +1268,8 @@ export async function configureMikrotikDns(
         allowRemoteRequests: true,
       },
       firewallRulesConfigured: redirectPort53,
+      udpVerified: redirectPort53,
+      tcpVerified: redirectPort53,
       message: `[MOCK] DNS and NAT firewall rules applied to ${cleanHost}`,
     };
   }
@@ -1265,7 +1286,10 @@ export async function configureMikrotikDns(
     return {
       success: false,
       code: classified.code,
-      error: `Failed to connect and read DNS from router: ${classified.message}`,
+      error: {
+        code: classified.code,
+        message: `Failed to connect and read DNS from router: ${classified.message}`,
+      },
     };
   }
 
@@ -1281,26 +1305,67 @@ export async function configureMikrotikDns(
     return {
       success: false,
       code: classified.code,
-      error: `Failed to update DNS servers on router: ${classified.message}`,
+      error: {
+        code: classified.code,
+        message: `Failed to update DNS servers on router: ${classified.message}`,
+      },
     };
   }
 
   // 3. Configure Firewall NAT redirect rules for DNS (UDP & TCP port 53) idempotently
   if (redirectPort53) {
-    // Check existing UDP rule
-    const udpCheck = await queryMikrotikSocket(params, [
-      "/ip/firewall/nat/print",
-      "?comment=Nexora-DNS-Redirect-UDP",
-    ]);
-    let udpId = "";
-    if (udpCheck.success && udpCheck.sentences?.length) {
-      for (const sent of udpCheck.sentences) {
+    // Inspect all existing NAT rules to find any existing Nexora UDP/TCP rules
+    const allNatRules = await queryMikrotikSocket(params, ["/ip/firewall/nat/print"]);
+    let existingUdpId = "";
+    let existingTcpId = "";
+
+    if (allNatRules.success && allNatRules.sentences?.length) {
+      for (const sent of allNatRules.sentences) {
+        let ruleId = "";
+        let ruleComment = "";
+        let ruleProtocol = "";
+        let ruleDstPort = "";
+        let ruleAction = "";
+
         for (const w of sent) {
-          if (w.startsWith("=.id=")) udpId = w.substring(5);
+          if (w.startsWith("=.id=")) ruleId = w.substring(5);
+          if (w.startsWith("=comment=")) ruleComment = w.substring(9).toLowerCase();
+          if (w.startsWith("=protocol=")) ruleProtocol = w.substring(10).toLowerCase();
+          if (w.startsWith("=dst-port=")) ruleDstPort = w.substring(10);
+          if (w.startsWith("=action=")) ruleAction = w.substring(8).toLowerCase();
+        }
+
+        if (
+          ruleComment.includes("nexora-dns-redirect-udp") ||
+          (ruleProtocol === "udp" && ruleDstPort === "53" && ruleAction === "redirect")
+        ) {
+          existingUdpId = ruleId;
+        }
+
+        if (
+          ruleComment.includes("nexora-dns-redirect-tcp") ||
+          (ruleProtocol === "tcp" && ruleDstPort === "53" && ruleAction === "redirect")
+        ) {
+          existingTcpId = ruleId;
         }
       }
     }
-    if (!udpId) {
+
+    // Apply or update UDP NAT redirect rule
+    if (existingUdpId) {
+      const setUdpWords = [
+        "/ip/firewall/nat/set",
+        `=.id=${existingUdpId}`,
+        "=disabled=no",
+        "=action=redirect",
+        "=to-ports=53",
+        "=protocol=udp",
+        "=dst-port=53",
+        "=comment=NEXORA-DNS-REDIRECT-UDP",
+      ];
+      if (subnet) setUdpWords.push(`=src-address=${subnet}`);
+      await queryMikrotikSocket(params, setUdpWords);
+    } else {
       const addUdpWords = [
         "/ip/firewall/nat/add",
         "=chain=dstnat",
@@ -1308,36 +1373,27 @@ export async function configureMikrotikDns(
         "=to-ports=53",
         "=protocol=udp",
         "=dst-port=53",
-        "=comment=Nexora-DNS-Redirect-UDP",
+        "=comment=NEXORA-DNS-REDIRECT-UDP",
       ];
       if (subnet) addUdpWords.push(`=src-address=${subnet}`);
       await queryMikrotikSocket(params, addUdpWords);
-    } else {
-      const setUdpWords = [
+    }
+
+    // Apply or update TCP NAT redirect rule
+    if (existingTcpId) {
+      const setTcpWords = [
         "/ip/firewall/nat/set",
-        `=.id=${udpId}`,
+        `=.id=${existingTcpId}`,
         "=disabled=no",
         "=action=redirect",
         "=to-ports=53",
+        "=protocol=tcp",
+        "=dst-port=53",
+        "=comment=NEXORA-DNS-REDIRECT-TCP",
       ];
-      if (subnet) setUdpWords.push(`=src-address=${subnet}`);
-      await queryMikrotikSocket(params, setUdpWords);
-    }
-
-    // Check existing TCP rule
-    const tcpCheck = await queryMikrotikSocket(params, [
-      "/ip/firewall/nat/print",
-      "?comment=Nexora-DNS-Redirect-TCP",
-    ]);
-    let tcpId = "";
-    if (tcpCheck.success && tcpCheck.sentences?.length) {
-      for (const sent of tcpCheck.sentences) {
-        for (const w of sent) {
-          if (w.startsWith("=.id=")) tcpId = w.substring(5);
-        }
-      }
-    }
-    if (!tcpId) {
+      if (subnet) setTcpWords.push(`=src-address=${subnet}`);
+      await queryMikrotikSocket(params, setTcpWords);
+    } else {
       const addTcpWords = [
         "/ip/firewall/nat/add",
         "=chain=dstnat",
@@ -1345,20 +1401,10 @@ export async function configureMikrotikDns(
         "=to-ports=53",
         "=protocol=tcp",
         "=dst-port=53",
-        "=comment=Nexora-DNS-Redirect-TCP",
+        "=comment=NEXORA-DNS-REDIRECT-TCP",
       ];
       if (subnet) addTcpWords.push(`=src-address=${subnet}`);
       await queryMikrotikSocket(params, addTcpWords);
-    } else {
-      const setTcpWords = [
-        "/ip/firewall/nat/set",
-        `=.id=${tcpId}`,
-        "=disabled=no",
-        "=action=redirect",
-        "=to-ports=53",
-      ];
-      if (subnet) setTcpWords.push(`=src-address=${subnet}`);
-      await queryMikrotikSocket(params, setTcpWords);
     }
   }
 
@@ -1382,30 +1428,83 @@ export async function configureMikrotikDns(
   if (!verifiedServers || !verifiedRemote) {
     return {
       success: false,
-      code: "COMMAND_FAILED",
-      error: `DNS configuration verification failed: read-back from router did not match requested settings.`,
+      code: "DNS_CONFIG_VERIFICATION_FAILED",
+      error: {
+        code: "DNS_CONFIG_VERIFICATION_FAILED",
+        message: `DNS configuration verification failed: read-back from router did not match requested settings.`,
+      },
     };
   }
 
-  // Read back NAT rules if redirect was requested
+  // 5. Independently verify BOTH UDP and TCP NAT redirect rules if redirect was requested
   if (redirectPort53) {
-    const verifyNat = await queryMikrotikSocket(params, [
-      "/ip/firewall/nat/print",
-      "?comment=Nexora-DNS-Redirect-UDP",
-    ]);
-    let natFound = false;
-    if (verifyNat.success && verifyNat.sentences?.length) {
-      for (const sent of verifyNat.sentences) {
+    const verifyNatRes = await queryMikrotikSocket(params, ["/ip/firewall/nat/print"]);
+    let udpVerified = false;
+    let tcpVerified = false;
+
+    if (verifyNatRes.success && verifyNatRes.sentences?.length) {
+      for (const sent of verifyNatRes.sentences) {
+        let comment = "";
+        let protocol = "";
+        let dstPort = "";
+        let action = "";
+        let toPorts = "";
+        let disabled = "";
+
         for (const w of sent) {
-          if (w.startsWith("=.id=")) natFound = true;
+          if (w.startsWith("=comment=")) comment = w.substring(9).toLowerCase();
+          if (w.startsWith("=protocol=")) protocol = w.substring(10).toLowerCase();
+          if (w.startsWith("=dst-port=")) dstPort = w.substring(10);
+          if (w.startsWith("=action=")) action = w.substring(8).toLowerCase();
+          if (w.startsWith("=to-ports=")) toPorts = w.substring(10);
+          if (w.startsWith("=disabled=")) disabled = w.substring(10).toLowerCase();
+        }
+
+        const isEnabled = disabled !== "yes" && disabled !== "true";
+
+        // Verify UDP rule
+        if (
+          isEnabled &&
+          action === "redirect" &&
+          (protocol === "udp" || comment.includes("nexora-dns-redirect-udp")) &&
+          (dstPort === "53" || dstPort.includes("53")) &&
+          toPorts === "53"
+        ) {
+          udpVerified = true;
+        }
+
+        // Verify TCP rule
+        if (
+          isEnabled &&
+          action === "redirect" &&
+          (protocol === "tcp" || comment.includes("nexora-dns-redirect-tcp")) &&
+          (dstPort === "53" || dstPort.includes("53")) &&
+          toPorts === "53"
+        ) {
+          tcpVerified = true;
         }
       }
     }
-    if (!natFound) {
+
+    if (!udpVerified) {
       return {
         success: false,
-        code: "COMMAND_FAILED",
-        error: `NAT redirect rule verification failed: Nexora-DNS-Redirect-UDP rule not confirmed on router.`,
+        code: "DNS_UDP_NAT_VERIFICATION_FAILED",
+        error: {
+          code: "DNS_UDP_NAT_VERIFICATION_FAILED",
+          message: "UDP DNS redirect rule could not be verified on router",
+        },
+      };
+    }
+
+    if (!tcpVerified) {
+      return {
+        success: false,
+        code: "DNS_TCP_NAT_VERIFICATION_FAILED",
+        error: {
+          code: "DNS_TCP_NAT_VERIFICATION_FAILED",
+          message: "TCP DNS redirect rule could not be verified on router",
+        },
       };
     }
   }
@@ -1417,7 +1516,9 @@ export async function configureMikrotikDns(
       allowRemoteRequests: verifiedRemote,
     },
     firewallRulesConfigured: redirectPort53,
-    message: `DNS configuration successfully verified on router (${cleanHost}): ${verifiedServers}`,
+    udpVerified: redirectPort53,
+    tcpVerified: redirectPort53,
+    message: `DNS configuration and NAT redirect rules (UDP & TCP) successfully verified on router (${cleanHost}): ${verifiedServers}`,
   };
 }
 
@@ -2379,6 +2480,7 @@ export async function syncMikrotikPackage(
 
   let pppSynced = false;
   let hsSynced = false;
+  const syncErrors: string[] = [];
 
   // 1. PPPoE Profile
   try {
@@ -2403,6 +2505,7 @@ export async function syncMikrotikPackage(
         `=comment=Nexora Package: ${pkg.name}`,
       ]);
       pppSynced = setPpp.success;
+      if (!setPpp.success && setPpp.error) syncErrors.push(`PPPoE profile set failed: ${setPpp.error}`);
     } else {
       const addPpp = await queryMikrotikSocket(params, [
         "/ppp/profile/add",
@@ -2411,8 +2514,11 @@ export async function syncMikrotikPackage(
         `=comment=Nexora Package: ${pkg.name}`,
       ]);
       pppSynced = addPpp.success;
+      if (!addPpp.success && addPpp.error) syncErrors.push(`PPPoE profile add failed: ${addPpp.error}`);
     }
-  } catch {}
+  } catch (err: any) {
+    syncErrors.push(`PPPoE profile query failed: ${err.message}`);
+  }
 
   // 2. Hotspot User Profile
   try {
@@ -2436,6 +2542,7 @@ export async function syncMikrotikPackage(
         `=rate-limit=${rateLimit}`,
       ]);
       hsSynced = setHs.success;
+      if (!setHs.success && setHs.error) syncErrors.push(`Hotspot profile set failed: ${setHs.error}`);
     } else {
       const addHs = await queryMikrotikSocket(params, [
         "/ip/hotspot/user/profile/add",
@@ -2443,14 +2550,19 @@ export async function syncMikrotikPackage(
         `=rate-limit=${rateLimit}`,
       ]);
       hsSynced = addHs.success;
+      if (!addHs.success && addHs.error) syncErrors.push(`Hotspot profile add failed: ${addHs.error}`);
     }
-  } catch {}
+  } catch (err: any) {
+    syncErrors.push(`Hotspot profile query failed: ${err.message}`);
+  }
 
   if (!pppSynced && !hsSynced) {
     return {
       success: false,
       code: "COMMAND_FAILED",
-      error: `Failed to synchronize package "${pkg.name}" profiles on MikroTik router. Check router connection and permissions.`,
+      error: syncErrors.length > 0
+        ? `Failed to synchronize package "${pkg.name}" profiles on MikroTik: ${syncErrors.join(" | ")}`
+        : `Failed to synchronize package "${pkg.name}" profiles on MikroTik router. Check router connection and permissions.`,
     };
   }
 
@@ -2505,6 +2617,7 @@ export async function setMikrotikClientStatus(
     targetStatus === "suspended" || targetStatus === "expired";
   let opSucceeded = false;
   let kicked = false;
+  const opErrors: string[] = [];
 
   // 1. PPPoE Secret
   try {
@@ -2525,10 +2638,15 @@ export async function setMikrotikClientStatus(
             `=disabled=${shouldDisable ? "yes" : "no"}`,
           ]);
           if (upd.success) opSucceeded = true;
+          else if (upd.error) opErrors.push(`PPPoE secret status update failed: ${upd.error}`);
         }
       }
+    } else if (!pppFind.success && pppFind.error) {
+      opErrors.push(`PPPoE secret search error: ${pppFind.error}`);
     }
-  } catch {}
+  } catch (err: any) {
+    opErrors.push(`PPPoE secret query failed: ${err.message}`);
+  }
 
   // 2. Hotspot User
   try {
@@ -2549,10 +2667,15 @@ export async function setMikrotikClientStatus(
             `=disabled=${shouldDisable ? "yes" : "no"}`,
           ]);
           if (upd.success) opSucceeded = true;
+          else if (upd.error) opErrors.push(`Hotspot user status update failed: ${upd.error}`);
         }
       }
+    } else if (!hsFind.success && hsFind.error) {
+      opErrors.push(`Hotspot user search error: ${hsFind.error}`);
     }
-  } catch {}
+  } catch (err: any) {
+    opErrors.push(`Hotspot user query failed: ${err.message}`);
+  }
 
   // 3. Simple Queue
   try {
@@ -2582,13 +2705,16 @@ export async function setMikrotikClientStatus(
       }
     }
     if (qId) {
-      await queryMikrotikSocket(params, [
+      const qUpd = await queryMikrotikSocket(params, [
         "/queue/simple/set",
         `=.id=${qId}`,
         `=disabled=${shouldDisable ? "yes" : "no"}`,
       ]);
+      if (qUpd.success) opSucceeded = true;
     }
-  } catch {}
+  } catch (err: any) {
+    console.warn(`Queue status toggle warning: ${err.message}`);
+  }
 
   // 4. If suspending or expired, actively kick live sessions from router
   if (shouldDisable) {
@@ -2640,7 +2766,9 @@ export async function setMikrotikClientStatus(
       success: false,
       newStatus: targetStatus,
       code: "COMMAND_FAILED",
-      error: `Could not locate or update client "${clientId}" in RouterOS database.`,
+      error: opErrors.length > 0
+        ? `RouterOS operations failed for "${clientId}": ${opErrors.join(" | ")}`
+        : `Could not locate or update client "${clientId}" in RouterOS database.`,
     };
   }
 

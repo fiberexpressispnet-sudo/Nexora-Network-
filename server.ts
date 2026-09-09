@@ -489,7 +489,10 @@ async function startServer() {
 
       let pppoeSynced = false;
       let hotspotSynced = false;
-      const syncErrors: string[] = [];
+      let queueSynced = false;
+      let pppoeError: string | undefined;
+      let hotspotError: string | undefined;
+      let queueResult: { success: boolean; error?: string; queueId?: string } | undefined;
 
       // Determine client type (PPPoE or Hotspot or Both)
       const isPppoe = client.connectionType === 'pppoe' || client.connectionType === 'PPPoE' || client.deviceType === 'Router' || client.device === 'Router' || !client.deviceType || !client.connectionType;
@@ -582,9 +585,11 @@ async function startServer() {
               `=comment=${clientComment}`,
               `=disabled=${isDisabled ? 'yes' : 'no'}`
             ], 2, 800);
-            if (!setRes.success) {
+            if (setRes.success) {
+              pppoeSynced = true;
+            } else {
               // Fallback without custom profile
-              await queryMikrotikSocketWithRetry(params, [
+              const fbRes = await queryMikrotikSocketWithRetry(params, [
                 '/ppp/secret/set',
                 `=.id=${secretId}`,
                 `=password=${secretPassword}`,
@@ -592,6 +597,11 @@ async function startServer() {
                 `=comment=${clientComment}`,
                 `=disabled=${isDisabled ? 'yes' : 'no'}`
               ], 2, 800);
+              if (fbRes.success) {
+                pppoeSynced = true;
+              } else {
+                pppoeError = fbRes.error || setRes.error || "Failed to update PPPoE secret";
+              }
             }
           } else {
             const addRes = await queryMikrotikSocketWithRetry(params, [
@@ -603,9 +613,11 @@ async function startServer() {
               `=comment=${clientComment}`,
               `=disabled=${isDisabled ? 'yes' : 'no'}`
             ], 2, 800);
-            if (!addRes.success) {
+            if (addRes.success) {
+              pppoeSynced = true;
+            } else {
               // Fallback without custom profile
-              await queryMikrotikSocketWithRetry(params, [
+              const fbAddRes = await queryMikrotikSocketWithRetry(params, [
                 '/ppp/secret/add',
                 `=name=${client.userId}`,
                 `=password=${secretPassword}`,
@@ -613,17 +625,15 @@ async function startServer() {
                 `=comment=${clientComment}`,
                 `=disabled=${isDisabled ? 'yes' : 'no'}`
               ], 2, 800);
+              if (fbAddRes.success) {
+                pppoeSynced = true;
+              } else {
+                pppoeError = fbAddRes.error || addRes.error || "Failed to add PPPoE secret";
+              }
             }
           }
 
-          // 3. Simple Queue (Assigns Priority & Bandwidth limit with Valid Target IP/Subnet)
-          try {
-            await syncMikrotikClientQueue(params, client, limitSpeed, prioStr);
-          } catch (qErr: any) {
-            console.warn('Queue priority sync warning:', qErr.message);
-          }
-
-          // 4. If disabled, kick active PPPoE session
+          // If disabled, kick active PPPoE session
           if (isDisabled) {
             try {
               const activePpp = await queryMikrotikSocketWithRetry(params, [
@@ -645,9 +655,8 @@ async function startServer() {
               console.warn('Could not kick PPPoE session:', err.message);
             }
           }
-          pppoeSynced = true;
         } catch (pppErr: any) {
-          syncErrors.push(`PPPoE sync error: ${pppErr.message}`);
+          pppoeError = pppErr.message || "PPPoE secret sync failed";
         }
       }
 
@@ -734,14 +743,21 @@ async function startServer() {
               `=comment=${clientComment}`,
               `=disabled=${isDisabled ? 'yes' : 'no'}`
             ], 2, 800);
-            if (!hsSetRes.success) {
-              await queryMikrotikSocketWithRetry(params, [
+            if (hsSetRes.success) {
+              hotspotSynced = true;
+            } else {
+              const fbHsRes = await queryMikrotikSocketWithRetry(params, [
                 '/ip/hotspot/user/set',
                 `=.id=${userObjectId}`,
                 `=password=${secretPassword}`,
                 `=comment=${clientComment}`,
                 `=disabled=${isDisabled ? 'yes' : 'no'}`
               ], 2, 800);
+              if (fbHsRes.success) {
+                hotspotSynced = true;
+              } else {
+                hotspotError = fbHsRes.error || hsSetRes.error || "Failed to update Hotspot user";
+              }
             }
           } else {
             const hsAddRes = await queryMikrotikSocketWithRetry(params, [
@@ -752,14 +768,21 @@ async function startServer() {
               `=comment=${clientComment}`,
               `=disabled=${isDisabled ? 'yes' : 'no'}`
             ], 2, 800);
-            if (!hsAddRes.success) {
-              await queryMikrotikSocketWithRetry(params, [
+            if (hsAddRes.success) {
+              hotspotSynced = true;
+            } else {
+              const fbAddHs = await queryMikrotikSocketWithRetry(params, [
                 '/ip/hotspot/user/add',
                 `=name=${client.userId}`,
                 `=password=${secretPassword}`,
                 `=comment=${clientComment}`,
                 `=disabled=${isDisabled ? 'yes' : 'no'}`
               ], 2, 800);
+              if (fbAddHs.success) {
+                hotspotSynced = true;
+              } else {
+                hotspotError = fbAddHs.error || hsAddRes.error || "Failed to add Hotspot user";
+              }
             }
           }
 
@@ -789,18 +812,17 @@ async function startServer() {
               console.warn(`Could not kick active hotspot session: ${kickErr.message}`);
             }
           }
-          hotspotSynced = true;
         } catch (hotErr: any) {
-          syncErrors.push(`Hotspot sync error: ${hotErr.message}`);
+          hotspotError = hotErr.message || "Hotspot user sync failed";
         }
       }
 
       // ============================================
-      // C. REST API Fallback (RouterOS v7)
+      // C. REST API Fallback (RouterOS v7) if socket sync did not hit
       // ============================================
-      if (!pppoeSynced && !hotspotSynced) {
+      if ((isPppoe && !pppoeSynced) || (isHotspot && !hotspotSynced)) {
         try {
-          if (isPppoe) {
+          if (isPppoe && !pppoeSynced) {
             const restPppRes = await queryMikrotikRest(params, `ppp/secret/${client.userId}`, 'PATCH', {
               name: client.userId,
               password: secretPassword,
@@ -810,6 +832,7 @@ async function startServer() {
             });
             if (restPppRes.success) {
               pppoeSynced = true;
+              pppoeError = undefined;
             } else {
               const restAddPpp = await queryMikrotikRest(params, 'ppp/secret', 'PUT', {
                 name: client.userId,
@@ -819,11 +842,14 @@ async function startServer() {
                 comment: clientComment,
                 disabled: isDisabled,
               });
-              if (restAddPpp.success) pppoeSynced = true;
+              if (restAddPpp.success) {
+                pppoeSynced = true;
+                pppoeError = undefined;
+              }
             }
           }
 
-          if (isHotspot) {
+          if (isHotspot && !hotspotSynced) {
             const restHsRes = await queryMikrotikRest(params, `ip/hotspot/user/${client.userId}`, 'PATCH', {
               name: client.userId,
               password: secretPassword,
@@ -833,6 +859,7 @@ async function startServer() {
             });
             if (restHsRes.success) {
               hotspotSynced = true;
+              hotspotError = undefined;
             } else {
               const restAddHs = await queryMikrotikRest(params, 'ip/hotspot/user', 'PUT', {
                 name: client.userId,
@@ -841,35 +868,114 @@ async function startServer() {
                 comment: clientComment,
                 disabled: isDisabled,
               });
-              if (restAddHs.success) hotspotSynced = true;
+              if (restAddHs.success) {
+                hotspotSynced = true;
+                hotspotError = undefined;
+              }
             }
           }
         } catch (restFallErr: any) {
-          console.warn("REST fallback error:", restFallErr.message);
+          console.warn("REST fallback warning:", restFallErr.message);
         }
       }
 
-      if (pppoeSynced || hotspotSynced) {
-        res.json({
-          success: true,
-          message: `Client ${client.name} (${client.userId}) successfully synced to MikroTik (${pppoeSynced ? 'PPPoE Secret' : ''} ${hotspotSynced ? 'Hotspot User' : ''})!`,
-          syncLog: {
-            userId: client.userId,
-            name: client.name,
-            targetRouter: router.name,
-            pppoeSynced,
-            hotspotSynced,
-            syncedAt: new Date().toISOString(),
-          }
-        });
-      } else {
-        res.status(400).json({
+      // ============================================
+      // D. Simple Queue (Assigns Priority & Bandwidth limit with Valid Target IP/Subnet)
+      // ============================================
+      try {
+        const qRes = await syncMikrotikClientQueue(params, client, limitSpeed, prioStr);
+        queueSynced = qRes.success;
+        queueResult = {
+          success: qRes.success,
+          ...(qRes.error ? { error: qRes.error } : {}),
+          ...(qRes.queueId ? { queueId: qRes.queueId } : {}),
+        };
+      } catch (qErr: any) {
+        queueSynced = false;
+        queueResult = {
           success: false,
-          error: syncErrors.join(' | ') || 'Could not provision client on physical MikroTik router.',
-        });
+          error: qErr.message || "Failed to create/update Simple Queue on router",
+        };
       }
+
+      // ============================================
+      // E. Evaluate Component-Level Success and Return Structured Result
+      // ============================================
+      const isPppoeRequested = Boolean(isPppoe);
+      const isHotspotRequested = Boolean(isHotspot);
+
+      const pppOk = !isPppoeRequested || pppoeSynced;
+      const hsOk = !isHotspotRequested || hotspotSynced;
+      const queueOk = queueSynced;
+
+      // The overall sync MUST NOT say success=true if any important component failed
+      const overallSuccess = pppOk && hsOk && queueOk;
+
+      const pppoeComponent = isPppoeRequested
+        ? { success: pppoeSynced, ...(pppoeError ? { error: pppoeError } : {}) }
+        : undefined;
+
+      const hotspotComponent = isHotspotRequested
+        ? { success: hotspotSynced, ...(hotspotError ? { error: hotspotError } : {}) }
+        : undefined;
+
+      const queueComponent = queueResult || {
+        success: queueSynced,
+        error: "Simple Queue was not synchronized",
+      };
+
+      const syncErrorsList = [
+        pppoeComponent && !pppoeComponent.success ? `PPPoE: ${pppoeComponent.error}` : null,
+        hotspotComponent && !hotspotComponent.success ? `Hotspot: ${hotspotComponent.error}` : null,
+        queueComponent && !queueComponent.success ? `Queue: ${queueComponent.error}` : null,
+      ].filter(Boolean) as string[];
+
+      const responsePayload = {
+        success: overallSuccess,
+        pppoe: pppoeComponent,
+        hotspot: hotspotComponent,
+        queue: queueComponent,
+        syncLog: {
+          userId: client.userId,
+          name: client.name,
+          targetRouter: router.name,
+          pppoeSynced,
+          hotspotSynced,
+          queueSynced,
+          syncedAt: new Date().toISOString(),
+        },
+        ...(!overallSuccess
+          ? {
+              error: {
+                code: "SYNC_FAILED",
+                message: syncErrorsList.join(" | ") || "One or more sync operations failed on RouterOS",
+              },
+            }
+          : {
+              message: `Client ${client.name} (${client.userId}) successfully synced to MikroTik (${[
+                pppoeSynced && "PPPoE Secret",
+                hotspotSynced && "Hotspot User",
+                queueSynced && "Simple Queue",
+              ]
+                .filter(Boolean)
+                .join(", ")})!`,
+            }),
+      };
+
+      if (!overallSuccess) {
+        return res.status(400).json(responsePayload);
+      }
+
+      res.json(responsePayload);
     } catch (err: any) {
-      res.status(500).json({ success: false, error: `Router connection failed: ${err.message}` });
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: classified.code,
+          message: classified.message,
+        },
+      });
     }
   });
 
@@ -1054,17 +1160,17 @@ async function startServer() {
           port: Number(router.apiPort) || 8728,
           username: String(router.username || '').trim(),
           password: router.password ? String(router.password).trim() : '',
-          timeoutMs: 800,
+          timeoutMs: 1500,
           useSsl: Number(router.apiPort) === 8729,
         };
         const probe = await queryMikrotikSocket(probeParams, ['/system/resource/print']);
         if (!probe.success) {
-          return res.json({
-            success: true,
-            isPrivate: true,
-            userId,
-            enabled,
-            message: `Client ${userId} status updated to ${enabled ? 'ONLINE' : 'OFFLINE'} in billing portal. (Notice: ${cleanHost} is a local LAN IP; connect via Public IP / Cloud DDNS for direct hardware control).`,
+          return res.status(503).json({
+            success: false,
+            error: {
+              code: "ROUTER_UNREACHABLE",
+              message: `Cannot reach MikroTik router at ${cleanHost}. Ensure the router is powered on and accessible via Public IP, VPN, or direct network route.`,
+            },
           });
         }
       }
@@ -1074,55 +1180,58 @@ async function startServer() {
         port: Number(router.apiPort) || 8728,
         username: String(router.username || '').trim(),
         password: router.password ? String(router.password).trim() : '',
-        timeoutMs: 2500,
+        timeoutMs: 4000,
         useSsl: Number(router.apiPort) === 8729,
       };
 
       let toggledCount = 0;
+      const toggleErrors: string[] = [];
 
       // 1. Toggle in Hotspot
       try {
-        const hsPrint = await queryMikrotikSocketWithRetry(params, ['/ip/hotspot/user/print', `?name=${userId}`], 1, 400);
+        const hsPrint = await queryMikrotikSocketWithRetry(params, ['/ip/hotspot/user/print', `?name=${userId}`], 2, 400);
         if (hsPrint.success && hsPrint.sentences?.length) {
           for (const sent of hsPrint.sentences) {
             let id = '';
             for (const w of sent) if (w.startsWith('=.id=')) id = w.substring(5);
             if (id) {
-              await queryMikrotikSocketWithRetry(params, ['/ip/hotspot/user/set', `=.id=${id}`, `=disabled=${enabled ? 'no' : 'yes'}`], 1, 400);
-              toggledCount++;
+              const res = await queryMikrotikSocketWithRetry(params, ['/ip/hotspot/user/set', `=.id=${id}`, `=disabled=${enabled ? 'no' : 'yes'}`], 2, 400);
+              if (res.success) toggledCount++;
+              else toggleErrors.push(`Hotspot user set error: ${res.error}`);
             }
           }
         }
       } catch (err: any) {
-        console.warn('Hotspot toggle error:', err.message);
+        toggleErrors.push(`Hotspot toggle error: ${err.message}`);
       }
 
       // 2. Toggle in PPPoE Secret
       try {
-        const pppPrint = await queryMikrotikSocketWithRetry(params, ['/ppp/secret/print', `?name=${userId}`], 1, 400);
+        const pppPrint = await queryMikrotikSocketWithRetry(params, ['/ppp/secret/print', `?name=${userId}`], 2, 400);
         if (pppPrint.success && pppPrint.sentences?.length) {
           for (const sent of pppPrint.sentences) {
             let id = '';
             for (const w of sent) if (w.startsWith('=.id=')) id = w.substring(5);
             if (id) {
-              await queryMikrotikSocketWithRetry(params, ['/ppp/secret/set', `=.id=${id}`, `=disabled=${enabled ? 'no' : 'yes'}`], 1, 400);
-              toggledCount++;
+              const res = await queryMikrotikSocketWithRetry(params, ['/ppp/secret/set', `=.id=${id}`, `=disabled=${enabled ? 'no' : 'yes'}`], 2, 400);
+              if (res.success) toggledCount++;
+              else toggleErrors.push(`PPPoE secret set error: ${res.error}`);
             }
           }
         }
       } catch (err: any) {
-        console.warn('PPPoE secret toggle error:', err.message);
+        toggleErrors.push(`PPPoE secret toggle error: ${err.message}`);
       }
 
       // 3. Toggle in Simple Queue
       try {
-        const qPrint = await queryMikrotikSocketWithRetry(params, ['/queue/simple/print', `?name=${userId}`], 1, 400);
+        const qPrint = await queryMikrotikSocketWithRetry(params, ['/queue/simple/print', `?name=${userId}`], 2, 400);
         if (qPrint.success && qPrint.sentences?.length) {
           for (const sent of qPrint.sentences) {
             let id = '';
             for (const w of sent) if (w.startsWith('=.id=')) id = w.substring(5);
             if (id) {
-              await queryMikrotikSocketWithRetry(params, ['/queue/simple/set', `=.id=${id}`, `=disabled=${enabled ? 'no' : 'yes'}`], 1, 400);
+              await queryMikrotikSocketWithRetry(params, ['/queue/simple/set', `=.id=${id}`, `=disabled=${enabled ? 'no' : 'yes'}`], 2, 400);
             }
           }
         }
@@ -1155,16 +1264,30 @@ async function startServer() {
         } catch {}
       }
 
-      // 5. REST API Fallback (RouterOS v7) if socket toggle did not hit
+      // 5. REST API Fallback (RouterOS v7) if socket toggle did not find entries
       if (toggledCount === 0) {
         try {
-          await queryMikrotikRest(params, `ppp/secret/${userId}`, 'PATCH', { disabled: !enabled });
-          await queryMikrotikRest(params, `ip/hotspot/user/${userId}`, 'PATCH', { disabled: !enabled });
+          const rPpp = await queryMikrotikRest(params, `ppp/secret/${userId}`, 'PATCH', { disabled: !enabled });
+          if (rPpp.success) toggledCount++;
+          const rHs = await queryMikrotikRest(params, `ip/hotspot/user/${userId}`, 'PATCH', { disabled: !enabled });
+          if (rHs.success) toggledCount++;
           await queryMikrotikRest(params, `queue/simple/${userId}`, 'PATCH', { disabled: !enabled });
-          toggledCount++;
         } catch (restErr: any) {
           console.warn('REST toggle fallback error:', restErr.message);
         }
+      }
+
+      if (toggledCount === 0) {
+        const toggleErrMsg = toggleErrors.length > 0 
+          ? toggleErrors.join(" | ")
+          : `Client ${userId} was not found on MikroTik router (checked Hotspot users and PPPoE secrets).`;
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: "CLIENT_NOT_FOUND_ON_ROUTER",
+            message: toggleErrMsg,
+          },
+        });
       }
 
       res.json({
@@ -1172,27 +1295,29 @@ async function startServer() {
         userId,
         enabled,
         toggledCount,
-        message: toggledCount > 0
-          ? `Client ${userId} status changed to ${enabled ? 'ACTIVE' : 'DISABLED'} on physical MikroTik router!`
-          : `Client ${userId} status updated to ${enabled ? 'ACTIVE' : 'DISABLED'} in billing system.`,
+        message: `Client ${userId} status successfully changed to ${enabled ? 'ACTIVE' : 'DISABLED'} on physical MikroTik router!`,
       });
     } catch (err: any) {
-      console.warn("MikroTik toggle exception handled:", err.message);
-      res.json({
-        success: true,
-        userId,
-        enabled,
-        error: `Saved in billing database. Router note: ${err.message}`,
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: classified.code,
+          message: classified.message,
+        },
       });
     }
   });
 
-  // 9b. MikroTik Delete Client from Router (Hotspot Users & PPPoE Secrets & Active Sessions)
+  // 9b. MikroTik Delete Client from Router (Hotspot Users & PPPoE Secrets & Active Sessions & Queues)
   app.post("/api/mikrotik/delete-client", async (req, res) => {
     const { router, userId } = req.body;
     try {
       if (!userId) {
-        return res.status(400).json({ success: false, error: "UserId is required" });
+        return res.status(400).json({
+          success: false,
+          error: { code: "INVALID_REQUEST", message: "UserId is required" },
+        });
       }
 
       const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : '';
@@ -1217,6 +1342,7 @@ async function startServer() {
       };
 
       let removedCount = 0;
+      const deleteErrors: string[] = [];
 
       // 1. Remove from Hotspot user list
       try {
@@ -1226,13 +1352,14 @@ async function startServer() {
             let id = '';
             for (const w of sent) if (w.startsWith('=.id=')) id = w.substring(5);
             if (id) {
-              await queryMikrotikSocketWithRetry(params, ['/ip/hotspot/user/remove', `=.id=${id}`], 2, 800);
-              removedCount++;
+              const rem = await queryMikrotikSocketWithRetry(params, ['/ip/hotspot/user/remove', `=.id=${id}`], 2, 800);
+              if (rem.success) removedCount++;
+              else deleteErrors.push(`Hotspot user remove error: ${rem.error}`);
             }
           }
         }
       } catch (err: any) {
-        console.warn('Hotspot delete user error:', err.message);
+        deleteErrors.push(`Hotspot delete user error: ${err.message}`);
       }
 
       // 2. Remove from PPPoE secret list
@@ -1243,16 +1370,35 @@ async function startServer() {
             let id = '';
             for (const w of sent) if (w.startsWith('=.id=')) id = w.substring(5);
             if (id) {
-              await queryMikrotikSocketWithRetry(params, ['/ppp/secret/remove', `=.id=${id}`], 2, 800);
-              removedCount++;
+              const rem = await queryMikrotikSocketWithRetry(params, ['/ppp/secret/remove', `=.id=${id}`], 2, 800);
+              if (rem.success) removedCount++;
+              else deleteErrors.push(`PPPoE secret remove error: ${rem.error}`);
             }
           }
         }
       } catch (err: any) {
-        console.warn('PPPoE secret delete error:', err.message);
+        deleteErrors.push(`PPPoE secret delete error: ${err.message}`);
       }
 
-      // 3. Terminate active sessions
+      // 3. Remove Simple Queues
+      try {
+        for (const qTarget of [`nexora_${userId}`, userId]) {
+          const qPrint = await queryMikrotikSocketWithRetry(params, ['/queue/simple/print', `?name=${qTarget}`], 2, 600);
+          if (qPrint.success && qPrint.sentences?.length) {
+            for (const sent of qPrint.sentences) {
+              let id = '';
+              for (const w of sent) if (w.startsWith('=.id=')) id = w.substring(5);
+              if (id) {
+                await queryMikrotikSocketWithRetry(params, ['/queue/simple/remove', `=.id=${id}`], 2, 600);
+              }
+            }
+          }
+        }
+      } catch (qErr: any) {
+        console.warn('Queue removal warning:', qErr.message);
+      }
+
+      // 4. Terminate active sessions
       try {
         const actHs = await queryMikrotikSocketWithRetry(params, ['/ip/hotspot/active/print', `?user=${userId}`], 1, 500);
         if (actHs.success && actHs.sentences?.length) {
@@ -1275,6 +1421,16 @@ async function startServer() {
         }
       } catch {}
 
+      if (deleteErrors.length > 0 && removedCount === 0) {
+        return res.status(500).json({
+          success: false,
+          error: {
+            code: "DELETE_FAILED",
+            message: deleteErrors.join(" | "),
+          },
+        });
+      }
+
       res.json({
         success: true,
         userId,
@@ -1282,7 +1438,120 @@ async function startServer() {
         message: `Client ${userId} permanently purged from physical MikroTik router!`,
       });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: `Router deletion failed: ${err.message}` });
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: classified.code,
+          message: classified.message,
+        },
+      });
+    }
+  });
+
+  // 9c. MikroTik Kick Active Session (/ppp/active & /ip/hotspot/active)
+  app.post("/api/mikrotik/kick-session", async (req, res) => {
+    const { router, userId } = req.body;
+    try {
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: { code: "INVALID_REQUEST", message: "UserId is required to terminate session" },
+        });
+      }
+      const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : "";
+      if (!cleanHost) {
+        return res.status(400).json({
+          success: false,
+          error: { code: "INVALID_CONFIGURATION", message: "Router IP address is required" },
+        });
+      }
+      const isExplicitDemo = (process.env.MIKROTIK_MOCK_MODE === "true") || (!router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
+      if (isExplicitDemo) {
+        return res.json({
+          success: true,
+          isDemo: true,
+          userId,
+          kicked: true,
+          message: `[Simulator Mode] Active session for ${userId} kicked on Demo Router.`,
+        });
+      }
+
+      const params: MikrotikConnParams = {
+        host: cleanHost,
+        port: Number(router.apiPort) || 8728,
+        username: String(router.username || '').trim(),
+        password: router.password ? String(router.password).trim() : '',
+        timeoutMs: 5000,
+        useSsl: Number(router.apiPort) === 8729,
+      };
+
+      let kickedCount = 0;
+      const kickErrors: string[] = [];
+
+      // 1. Terminate Hotspot active session
+      try {
+        const actHs = await queryMikrotikSocketWithRetry(params, ['/ip/hotspot/active/print', `?user=${userId}`], 2, 500);
+        if (actHs.success && actHs.sentences?.length) {
+          for (const sent of actHs.sentences) {
+            let id = '';
+            for (const w of sent) if (w.startsWith('=.id=')) id = w.substring(5);
+            if (id) {
+              const rem = await queryMikrotikSocketWithRetry(params, ['/ip/hotspot/active/remove', `=.id=${id}`], 2, 500);
+              if (rem.success) kickedCount++;
+              else kickErrors.push(`Hotspot session termination failed: ${rem.error}`);
+            }
+          }
+        }
+      } catch (hsErr: any) {
+        kickErrors.push(`Hotspot active query failed: ${hsErr.message}`);
+      }
+
+      // 2. Terminate PPPoE active session
+      try {
+        const actPpp = await queryMikrotikSocketWithRetry(params, ['/ppp/active/print', `?name=${userId}`], 2, 500);
+        if (actPpp.success && actPpp.sentences?.length) {
+          for (const sent of actPpp.sentences) {
+            let id = '';
+            for (const w of sent) if (w.startsWith('=.id=')) id = w.substring(5);
+            if (id) {
+              const rem = await queryMikrotikSocketWithRetry(params, ['/ppp/active/remove', `=.id=${id}`], 2, 500);
+              if (rem.success) kickedCount++;
+              else kickErrors.push(`PPPoE session termination failed: ${rem.error}`);
+            }
+          }
+        }
+      } catch (pppErr: any) {
+        kickErrors.push(`PPPoE active query failed: ${pppErr.message}`);
+      }
+
+      if (kickErrors.length > 0 && kickedCount === 0) {
+        return res.status(500).json({
+          success: false,
+          error: {
+            code: "COMMAND_FAILED",
+            message: kickErrors.join(" | "),
+          },
+        });
+      }
+
+      res.json({
+        success: true,
+        userId,
+        kickedCount,
+        message: kickedCount > 0
+          ? `Successfully terminated ${kickedCount} active session(s) for ${userId}.`
+          : `No active sessions currently running for ${userId}.`,
+      });
+    } catch (err: any) {
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: classified.code,
+          message: classified.message,
+        },
+      });
     }
   });
 

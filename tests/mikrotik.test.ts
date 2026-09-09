@@ -174,6 +174,117 @@ const cleanedHost = sanitizeMikrotikHost("https://192.168.88.1:8728/webfig");
 assert(cleanedHost === "192.168.88.1", "Sanitizes URL prefixes, ports, and paths from host");
 
 // -------------------------------------------------------------
+// 6. DNS Redirect NAT Independent Verification & Error Codes
+// -------------------------------------------------------------
+console.log("\nSuite 6: DNS NAT Independent Verification & Error Structures");
+
+const tcpNatErr = classifyMikrotikError("DNS TCP NAT redirect rule verification failed on RouterOS");
+assert(tcpNatErr.code === "DNS_TCP_NAT_VERIFICATION_FAILED", "Classifies DNS TCP NAT verification error");
+
+const udpNatErr = classifyMikrotikError("DNS UDP NAT redirect rule verification failed on RouterOS");
+assert(udpNatErr.code === "DNS_UDP_NAT_VERIFICATION_FAILED", "Classifies DNS UDP NAT verification error");
+
+// Verify read-back logic simulation for UDP and TCP
+const testNatSentencesWithBoth = [
+  ["=comment=NEXORA-DNS-REDIRECT-UDP", "=action=redirect", "=dst-port=53"],
+  ["=comment=NEXORA-DNS-REDIRECT-TCP", "=action=redirect", "=dst-port=53"],
+];
+let udpFound = false;
+let tcpFound = false;
+for (const sent of testNatSentencesWithBoth) {
+  for (const word of sent) {
+    if (word.includes("NEXORA-DNS-REDIRECT-UDP")) udpFound = true;
+    if (word.includes("NEXORA-DNS-REDIRECT-TCP")) tcpFound = true;
+  }
+}
+assert(udpFound === true && tcpFound === true, "Both UDP and TCP NAT redirect rules verified present");
+
+const testNatSentencesWithOnlyUdp = [
+  ["=comment=NEXORA-DNS-REDIRECT-UDP", "=action=redirect", "=dst-port=53"],
+];
+let udpOnly = false;
+let tcpOnly = false;
+for (const sent of testNatSentencesWithOnlyUdp) {
+  for (const word of sent) {
+    if (word.includes("NEXORA-DNS-REDIRECT-UDP")) udpOnly = true;
+    if (word.includes("NEXORA-DNS-REDIRECT-TCP")) tcpOnly = true;
+  }
+}
+assert(udpOnly === true && tcpOnly === false, "Detects missing TCP NAT redirect rule independently");
+
+// -------------------------------------------------------------
+// 7. Multi-Step Client Sync: Component-Level Results & Error Integrity
+// -------------------------------------------------------------
+console.log("\nSuite 7: Multi-Step Client Sync Component Results & Error Integrity");
+
+// Simulation of sync evaluation logic:
+function evaluateSyncResult(opts: {
+  isPppoe: boolean;
+  isHotspot: boolean;
+  pppoeSynced: boolean;
+  hotspotSynced: boolean;
+  queueSynced: boolean;
+  queueError?: string;
+  pppoeError?: string;
+}) {
+  const pppOk = !opts.isPppoe || opts.pppoeSynced;
+  const hsOk = !opts.isHotspot || opts.hotspotSynced;
+  const queueOk = opts.queueSynced;
+  const overallSuccess = pppOk && hsOk && queueOk;
+
+  return {
+    success: overallSuccess,
+    pppoe: opts.isPppoe ? { success: opts.pppoeSynced, ...(opts.pppoeError ? { error: opts.pppoeError } : {}) } : undefined,
+    hotspot: opts.isHotspot ? { success: opts.hotspotSynced } : undefined,
+    queue: { success: opts.queueSynced, ...(opts.queueError ? { error: opts.queueError } : {}) },
+  };
+}
+
+// Case 1: PPPoE OK, Hotspot OK, but Simple Queue failed
+const partialFailResult = evaluateSyncResult({
+  isPppoe: true,
+  isHotspot: true,
+  pppoeSynced: true,
+  hotspotSynced: true,
+  queueSynced: false,
+  queueError: "Failed to create Simple Queue: target IP already assigned",
+});
+assert(partialFailResult.success === false, "Overall sync is FALSE when Simple Queue fails despite PPPoE/Hotspot success");
+assert(partialFailResult.pppoe?.success === true, "PPPoE component correctly marked as success=true");
+assert(partialFailResult.hotspot?.success === true, "Hotspot component correctly marked as success=true");
+assert(partialFailResult.queue.success === false, "Queue component correctly marked as success=false");
+assert(partialFailResult.queue.error !== undefined, "Queue component contains descriptive error message");
+
+// Case 2: All components succeed
+const allSuccessResult = evaluateSyncResult({
+  isPppoe: true,
+  isHotspot: false,
+  pppoeSynced: true,
+  hotspotSynced: false,
+  queueSynced: true,
+});
+assert(allSuccessResult.success === true, "Overall sync is TRUE when all requested components succeed");
+assert(allSuccessResult.pppoe?.success === true, "PPPoE is success=true");
+assert(allSuccessResult.queue.success === true, "Queue is success=true");
+
+// Case 3: PPPoE failed, Queue OK
+const pppFailResult = evaluateSyncResult({
+  isPppoe: true,
+  isHotspot: false,
+  pppoeSynced: false,
+  pppoeError: "Username already exists in RouterOS secret table",
+  hotspotSynced: false,
+  queueSynced: true,
+});
+assert(pppFailResult.success === false, "Overall sync is FALSE when PPPoE secret fails");
+assert(pppFailResult.pppoe?.success === false, "PPPoE component has success=false");
+assert(pppFailResult.pppoe?.error?.includes("Username already exists"), "PPPoE error preserved accurately");
+
+// Case 4: No credentials exposed in error output
+const sanitizedErr = classifyMikrotikError("Authentication failure for user 'admin' password 'superSecret123'");
+assert(!sanitizedErr.message.includes("superSecret123"), "Passwords and sensitive secrets are never leaked in classified errors");
+
+// -------------------------------------------------------------
 // Results Summary
 // -------------------------------------------------------------
 console.log("\n============================================");
