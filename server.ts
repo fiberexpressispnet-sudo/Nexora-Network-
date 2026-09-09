@@ -13,6 +13,15 @@ import {
   diagnoseMikrotikConnection,
   sanitizeMikrotikHost,
   queryMikrotikRest,
+  isMockModeAllowed,
+  classifyMikrotikError,
+  executeMikrotikReboot,
+  configureMikrotikDns,
+  fetchMikrotikTraffic,
+  fetchMikrotikActiveUsers,
+  syncMikrotikClientQueue,
+  syncMikrotikPackage,
+  setMikrotikClientStatus,
 } from "./src/server/mikrotikApi";
 
 // Lazy initialization for GoogleGenAI
@@ -607,50 +616,9 @@ async function startServer() {
             }
           }
 
-          // 3. Simple Queue (Assigns Priority & Bandwidth limit explicitly to User)
+          // 3. Simple Queue (Assigns Priority & Bandwidth limit with Valid Target IP/Subnet)
           try {
-            const qRes = await queryMikrotikSocketWithRetry(params, [
-              '/queue/simple/print',
-              `?name=${client.userId}`
-            ], 1, 600);
-            let qExists = false;
-            let qId = '';
-            if (qRes.success && qRes.sentences?.length) {
-              for (const sent of qRes.sentences) {
-                let id = '';
-                let name = '';
-                for (const w of sent) {
-                  if (w.startsWith('=.id=')) id = w.substring(5);
-                  if (w.startsWith('=name=')) name = w.substring(6);
-                }
-                if (name === client.userId) {
-                  qExists = true;
-                  qId = id;
-                  break;
-                }
-              }
-            }
-
-            if (qExists && qId) {
-              await queryMikrotikSocketWithRetry(params, [
-                '/queue/simple/set',
-                `=.id=${qId}`,
-                `=max-limit=${limitSpeed}`,
-                `=priority=${prioStr}/${prioStr}`,
-                `=comment=Exp: ${expiryStr} | ${client.name || ''}`,
-                `=disabled=${isDisabled ? 'yes' : 'no'}`
-              ], 1, 600);
-            } else {
-              await queryMikrotikSocketWithRetry(params, [
-                '/queue/simple/add',
-                `=name=${client.userId}`,
-                `=target=${client.userId}`,
-                `=max-limit=${limitSpeed}`,
-                `=priority=${prioStr}/${prioStr}`,
-                `=comment=Exp: ${expiryStr} | ${client.name || ''}`,
-                `=disabled=${isDisabled ? 'yes' : 'no'}`
-              ], 1, 600);
-            }
+            await syncMikrotikClientQueue(params, client, limitSpeed, prioStr);
           } catch (qErr: any) {
             console.warn('Queue priority sync warning:', qErr.message);
           }
@@ -1318,101 +1286,262 @@ async function startServer() {
     }
   });
 
-  // 10. MikroTik Get Live Active Sessions (PPPoE + Hotspot)
+  // 10. MikroTik Get Live Active Sessions (PPPoE & Hotspot distinctly queried)
   app.post("/api/mikrotik/active-users", async (req, res) => {
     const { router } = req.body;
     try {
-      const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : '';
-      const isExplicitDemo = (process.env.MIKROTIK_MOCK_MODE === "true") || (!router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
-
-      if (isExplicitDemo) {
-        return res.json({
-          success: true,
-          isDemo: true,
-          activeUsers: [
-            { userId: "user01", ip: "192.168.88.15", uptime: "03:45:12", mac: "AA:BB:CC:DD:EE:01", type: "pppoe" },
-            { userId: "user02", ip: "192.168.88.16", uptime: "12:15:33", mac: "AA:BB:CC:DD:EE:02", type: "pppoe" },
-            { userId: "user04", ip: "192.168.88.18", uptime: "01:10:05", mac: "AA:BB:CC:DD:EE:04", type: "hotspot" },
-            { userId: "hotspot_9281", ip: "192.168.88.45", uptime: "00:45:00", mac: "12:34:56:78:90:AB", type: "hotspot" }
-          ]
+      const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : "";
+      if (!cleanHost) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_CONFIGURATION",
+          error: "Router IP address is required",
+          pppoeUsers: [],
+          hotspotUsers: [],
+          activeUsers: [],
         });
       }
 
       const params: MikrotikConnParams = {
         host: cleanHost,
         port: Number(router.apiPort) || 8728,
-        username: String(router.username || '').trim(),
-        password: router.password ? String(router.password).trim() : '',
-        timeoutMs: 8000,
+        username: String(router.username || "admin").trim(),
+        password: router.password ? String(router.password).trim() : "",
+        timeoutMs: 6000,
         useSsl: Number(router.apiPort) === 8729,
+        isDemo: Boolean(router.isDemo),
       };
 
-      const activeUsers: { userId: string; ip: string; uptime: string; mac?: string; type?: string }[] = [];
-
-      // 1. Hotspot active
-      try {
-        const hsResult = await queryMikrotikSocketWithRetry(params, ['/ip/hotspot/active/print'], 2, 800);
-        if (hsResult.success && hsResult.sentences?.length) {
-          for (const sent of hsResult.sentences) {
-            let uId = '';
-            let ip = '';
-            let uptime = '';
-            let mac = '';
-            for (const word of sent) {
-              if (word.startsWith('=user=')) uId = word.substring(6);
-              if (word.startsWith('=address=')) ip = word.substring(9);
-              if (word.startsWith('=uptime=')) uptime = word.substring(8);
-              if (word.startsWith('=mac-address=')) mac = word.substring(13);
-            }
-            if (uId) activeUsers.push({ userId: uId, ip, uptime, mac, type: 'hotspot' });
-          }
-        }
-      } catch {}
-
-      // 2. PPPoE active
-      try {
-        const pppResult = await queryMikrotikSocketWithRetry(params, ['/ppp/active/print'], 2, 800);
-        if (pppResult.success && pppResult.sentences?.length) {
-          for (const sent of pppResult.sentences) {
-            let uId = '';
-            let ip = '';
-            let uptime = '';
-            let callerId = '';
-            for (const word of sent) {
-              if (word.startsWith('=name=')) uId = word.substring(6);
-              if (word.startsWith('=address=')) ip = word.substring(9);
-              if (word.startsWith('=uptime=')) uptime = word.substring(8);
-              if (word.startsWith('=caller-id=')) callerId = word.substring(11);
-            }
-            if (uId) activeUsers.push({ userId: uId, ip, uptime, mac: callerId, type: 'pppoe' });
-          }
-        }
-      } catch {}
-
-      res.json({ success: true, activeUsers });
+      const result = await fetchMikrotikActiveUsers(params);
+      res.json(result);
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({
+        success: false,
+        code: classified.code,
+        error: classified.message,
+        pppoeUsers: [],
+        hotspotUsers: [],
+        activeUsers: [],
+      });
     }
   });
 
-  // 6. MikroTik DNS Security & Firewall
-  app.post("/api/mikrotik/apply-dns", async (req, res) => {
-    const { params, primary, secondary } = req.body;
+  // 11. MikroTik Real-time Interface & Queue Traffic (No Math.random)
+  app.post("/api/mikrotik/traffic", async (req, res) => {
+    const { router } = req.body;
     try {
-      const info = getSimulatedRouterOS6Info(params || { host: '192.168.88.1', port: 8728, username: 'admin' }, { primary, secondary, redirectActive: true });
-      res.json({ success: true, message: "DNS & NAT Firewall rules applied successfully to MikroTik", info });
+      const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : "";
+      if (!cleanHost) {
+        return res.json({
+          success: false,
+          status: "OFFLINE",
+          code: "INVALID_CONFIGURATION",
+          interfaces: [],
+          queues: [],
+          totalRxBps: 0,
+          totalTxBps: 0,
+          error: "Router IP is not configured",
+        });
+      }
+
+      const params: MikrotikConnParams = {
+        host: cleanHost,
+        port: Number(router.apiPort) || 8728,
+        username: String(router.username || "admin").trim(),
+        password: router.password ? String(router.password).trim() : "",
+        timeoutMs: 4000,
+        useSsl: Number(router.apiPort) === 8729,
+        isDemo: Boolean(router.isDemo),
+      };
+
+      const trafficResult = await fetchMikrotikTraffic(params);
+      res.json(trafficResult);
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      const classified = classifyMikrotikError(err.message);
+      res.json({
+        success: false,
+        status: "OFFLINE",
+        code: classified.code,
+        interfaces: [],
+        queues: [],
+        totalRxBps: 0,
+        totalTxBps: 0,
+        error: classified.message,
+      });
     }
   });
 
-  // 7. MikroTik Reboot Command
+  // 12. MikroTik DNS Security & NAT Redirect Rules (REAL RouterOS API execution)
+  app.post("/api/mikrotik/apply-dns", async (req, res) => {
+    const {
+      router,
+      params: bodyParams,
+      primary = "1.1.1.3",
+      secondary = "1.0.0.3",
+      redirectPort53 = true,
+      subnet,
+    } = req.body;
+    try {
+      const effectiveRouter = router || bodyParams || {};
+      const targetHost = effectiveRouter.ip || effectiveRouter.host || "";
+      const cleanHost = sanitizeMikrotikHost(targetHost);
+      if (!cleanHost) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_CONFIGURATION",
+          error: "Router IP address is required to configure DNS",
+        });
+      }
+
+      const connParams: MikrotikConnParams = {
+        host: cleanHost,
+        port: Number(effectiveRouter.apiPort || effectiveRouter.port) || 8728,
+        username: String(effectiveRouter.username || "admin").trim(),
+        password: effectiveRouter.password
+          ? String(effectiveRouter.password).trim()
+          : "",
+        timeoutMs: 8000,
+        useSsl: Number(effectiveRouter.apiPort || effectiveRouter.port) === 8729,
+        isDemo: Boolean(effectiveRouter.isDemo),
+      };
+
+      const dnsResult = await configureMikrotikDns(
+        connParams,
+        primary,
+        secondary,
+        redirectPort53,
+        subnet,
+      );
+      if (!dnsResult.success) {
+        return res.status(502).json(dnsResult);
+      }
+      res.json(dnsResult);
+    } catch (err: any) {
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({
+        success: false,
+        code: classified.code,
+        error: classified.message,
+      });
+    }
+  });
+
+  // 13. MikroTik Reboot Command (REAL RouterOS API execution)
   app.post("/api/mikrotik/reboot", async (req, res) => {
-    const { routerId, host } = req.body;
-    res.json({
-      success: true,
-      message: `Reboot command sent to MikroTik (${host || 'Router'}). System restarting in 3 seconds...`,
-    });
+    const { router, routerId, host, apiPort, username, password } = req.body;
+    try {
+      const targetHost = router?.ip || host || "";
+      const cleanHost = sanitizeMikrotikHost(targetHost);
+      if (!cleanHost) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_CONFIGURATION",
+          error: "MikroTik router IP or host is required for reboot operation",
+        });
+      }
+
+      const params: MikrotikConnParams = {
+        host: cleanHost,
+        port: Number(router?.apiPort || apiPort) || 8728,
+        username: String(router?.username || username || "admin").trim(),
+        password: router?.password
+          ? String(router.password).trim()
+          : password
+            ? String(password).trim()
+            : "",
+        timeoutMs: 8000,
+        useSsl: Number(router?.apiPort || apiPort) === 8729,
+        isDemo: Boolean(router?.isDemo),
+      };
+
+      const rebootResult = await executeMikrotikReboot(params);
+      if (!rebootResult.success) {
+        return res.status(502).json(rebootResult);
+      }
+      res.json(rebootResult);
+    } catch (err: any) {
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({
+        success: false,
+        code: classified.code,
+        error: classified.message,
+      });
+    }
+  });
+
+  // 14. MikroTik Package Sync (Profiles on RouterOS)
+  app.post("/api/mikrotik/sync-package", async (req, res) => {
+    const { router, package: pkg } = req.body;
+    try {
+      const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : "";
+      if (!cleanHost) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_CONFIGURATION",
+          error: "Router IP is required to sync package profile",
+        });
+      }
+      const params: MikrotikConnParams = {
+        host: cleanHost,
+        port: Number(router.apiPort) || 8728,
+        username: String(router.username || "admin").trim(),
+        password: router.password ? String(router.password).trim() : "",
+        timeoutMs: 8000,
+        useSsl: Number(router.apiPort) === 8729,
+        isDemo: Boolean(router.isDemo),
+      };
+
+      const result = await syncMikrotikPackage(params, pkg);
+      if (!result.success) {
+        return res.status(502).json(result);
+      }
+      res.json(result);
+    } catch (err: any) {
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({
+        success: false,
+        code: classified.code,
+        error: classified.message,
+      });
+    }
+  });
+
+  // 15. MikroTik Client Server-Side Status (Suspend / Activate)
+  app.post("/api/mikrotik/set-status", async (req, res) => {
+    const { router, clientId, status } = req.body;
+    try {
+      const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : "";
+      if (!cleanHost || !clientId) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_CONFIGURATION",
+          error: "Router IP and clientId are required to update client status",
+        });
+      }
+      const params: MikrotikConnParams = {
+        host: cleanHost,
+        port: Number(router.apiPort) || 8728,
+        username: String(router.username || "admin").trim(),
+        password: router.password ? String(router.password).trim() : "",
+        timeoutMs: 8000,
+        useSsl: Number(router.apiPort) === 8729,
+        isDemo: Boolean(router.isDemo),
+      };
+
+      const result = await setMikrotikClientStatus(params, clientId, status);
+      if (!result.success) {
+        return res.status(502).json(result);
+      }
+      res.json(result);
+    } catch (err: any) {
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({
+        success: false,
+        code: classified.code,
+        error: classified.message,
+      });
+    }
   });
 
   // 8. SMS Reminder / Broadcast Gateway Proxy

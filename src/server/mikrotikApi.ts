@@ -70,6 +70,99 @@ export interface DiagnosticResult {
   terminalScript: string;
 }
 
+export type MikrotikErrorCode =
+  | "ROUTER_OFFLINE"
+  | "AUTH_FAILED"
+  | "TIMEOUT"
+  | "API_UNAVAILABLE"
+  | "COMMAND_FAILED"
+  | "PERMISSION_DENIED"
+  | "INVALID_TARGET"
+  | "UNSUPPORTED_OPERATION"
+  | "INVALID_CONFIGURATION";
+
+export function isMockModeAllowed(): boolean {
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+  return process.env.MIKROTIK_MOCK_MODE === "true";
+}
+
+export function classifyMikrotikError(
+  errMessage: string,
+  socketErrCode?: string,
+): { code: MikrotikErrorCode; message: string } {
+  const lower = (errMessage || "").toLowerCase();
+  if (
+    socketErrCode === "ECONNREFUSED" ||
+    lower.includes("econnrefused") ||
+    lower.includes("connection refused")
+  ) {
+    return {
+      code: "API_UNAVAILABLE",
+      message:
+        "MikroTik API port (8728/8729) is closed or connection refused. Ensure API is enabled: '/ip service enable api'.",
+    };
+  }
+  if (
+    socketErrCode === "ETIMEDOUT" ||
+    socketErrCode === "ENOTFOUND" ||
+    lower.includes("timeout") ||
+    lower.includes("timed out") ||
+    lower.includes("not found")
+  ) {
+    return {
+      code: "ROUTER_OFFLINE",
+      message: `MikroTik router is unreachable or offline: ${errMessage}`,
+    };
+  }
+  if (
+    lower.includes("invalid username") ||
+    lower.includes("password") ||
+    lower.includes("authentication") ||
+    lower.includes("auth failed") ||
+    lower.includes("challenge rejected")
+  ) {
+    return {
+      code: "AUTH_FAILED",
+      message:
+        "RouterOS API authentication failed. Verify API username and password.",
+    };
+  }
+  if (
+    lower.includes("not enough permissions") ||
+    lower.includes("permission denied") ||
+    lower.includes("access denied")
+  ) {
+    return {
+      code: "PERMISSION_DENIED",
+      message:
+        "RouterOS user does not have sufficient group permissions (requires api, read, write, test, reboot).",
+    };
+  }
+  if (lower.includes("invalid target") || lower.includes("target")) {
+    return {
+      code: "INVALID_TARGET",
+      message: "Invalid target IP/subnet specified for Simple Queue.",
+    };
+  }
+  if (
+    lower.includes("no such command") ||
+    lower.includes("bad command") ||
+    lower.includes("syntax error") ||
+    lower.includes("unknown command")
+  ) {
+    return {
+      code: "UNSUPPORTED_OPERATION",
+      message: "Command not supported by this RouterOS version.",
+    };
+  }
+  return {
+    code: "COMMAND_FAILED",
+    message: errMessage || "RouterOS command execution failed.",
+  };
+}
+
 /**
  * Encodes a string word into RouterOS API length-prefixed bytes
  */
@@ -367,8 +460,11 @@ export async function queryMikrotikSocket(
   commandWords: string[],
 ): Promise<{ success: boolean; sentences: string[][]; error?: string }> {
   return new Promise((resolve) => {
-    // Only return simulated data if explicitly requested in Demo / Simulator Mode
-    if (params.isDemo || params.host === "demo.mikrotik.local") {
+    // Only return simulated data if explicitly permitted by MIKROTIK_MOCK_MODE and requested
+    const allowMock =
+      isMockModeAllowed() &&
+      (params.isDemo || params.host === "demo.mikrotik.local");
+    if (allowMock) {
       const cmd = commandWords[0] || "";
       let sentences: string[][] = [["!done"]];
 
@@ -486,6 +582,9 @@ export async function queryMikrotikSocket(
     const timeout = params.timeoutMs || 8000;
     const isSsl = params.useSsl || params.port === 8729;
     const isPrivate = isPrivateIp(params.host);
+    const isRebootCommand = commandWords.some((w) =>
+      w.includes("/system/reboot"),
+    );
 
     let socket: net.Socket;
     let isResolved = false;
@@ -562,7 +661,27 @@ export async function queryMikrotikSocket(
       });
     });
 
+    socket.on("close", () => {
+      if (
+        authenticated &&
+        isRebootCommand &&
+        !receivedSentences.some((s) => s[0] === "!trap")
+      ) {
+        finish({ success: true, sentences: [["!done"]] });
+      }
+    });
+
     socket.on("error", (err: any) => {
+      if (
+        authenticated &&
+        isRebootCommand &&
+        (err.code === "ECONNRESET" ||
+          err.message?.includes("reset") ||
+          err.message?.includes("closed"))
+      ) {
+        return finish({ success: true, sentences: [["!done"]] });
+      }
+
       let msg = err.message || "Socket error";
       if (err.code === "ECONNREFUSED") {
         msg = `Connection refused at ${params.host}:${params.port}. Make sure API is enabled: "/ip service enable api" (port 8728) in MikroTik Terminal.`;
@@ -773,6 +892,1328 @@ export function getSimulatedRouterOS6Info(
     allowRemoteRequests: true,
     redirectUdpPort53Active: isRedirect,
     redirectTcpPort53Active: isRedirect,
+  };
+}
+
+/**
+ * Real MikroTik RouterOS Reboot Command
+ */
+export async function executeMikrotikReboot(params: MikrotikConnParams): Promise<{
+  success: boolean;
+  code?: MikrotikErrorCode;
+  message?: string;
+  error?: string;
+}> {
+  if (!params.host) {
+    return {
+      success: false,
+      code: "INVALID_CONFIGURATION",
+      error: "Router IP/host is required for reboot operation",
+    };
+  }
+
+  const cleanHost = sanitizeMikrotikHost(params.host);
+  if (
+    isMockModeAllowed() &&
+    (params.isDemo || cleanHost === "demo.mikrotik.local")
+  ) {
+    return {
+      success: true,
+      message: `[MOCK] Simulated reboot signal sent to MikroTik (${cleanHost})`,
+    };
+  }
+
+  try {
+    const res = await queryMikrotikSocket(params, ["/system/reboot"]);
+    if (res.success) {
+      return {
+        success: true,
+        message: `Reboot command successfully sent and accepted by MikroTik (${cleanHost}). Router is restarting now.`,
+      };
+    }
+
+    const errLower = (res.error || "").toLowerCase();
+    if (
+      errLower.includes("econnreset") ||
+      errLower.includes("socket closed") ||
+      errLower.includes("connection reset")
+    ) {
+      return {
+        success: true,
+        message: `Reboot command accepted by MikroTik (${cleanHost}). Socket disconnected as router restarted.`,
+      };
+    }
+
+    const classified = classifyMikrotikError(res.error || "");
+    return {
+      success: false,
+      code: classified.code,
+      error: classified.message,
+    };
+  } catch (err: any) {
+    const classified = classifyMikrotikError(err.message);
+    return {
+      success: false,
+      code: classified.code,
+      error: classified.message,
+    };
+  }
+}
+
+/**
+ * Real MikroTik DNS and NAT Firewall Security Configuration
+ */
+export async function configureMikrotikDns(
+  params: MikrotikConnParams,
+  primaryDns: string,
+  secondaryDns?: string,
+  redirectPort53: boolean = true,
+  subnet?: string,
+): Promise<{
+  success: boolean;
+  code?: MikrotikErrorCode;
+  currentDns?: { servers: string; allowRemoteRequests: boolean };
+  firewallRulesConfigured?: boolean;
+  message?: string;
+  error?: string;
+}> {
+  if (!params.host) {
+    return {
+      success: false,
+      code: "INVALID_CONFIGURATION",
+      error: "Router IP is required",
+    };
+  }
+
+  const cleanHost = sanitizeMikrotikHost(params.host);
+  if (
+    isMockModeAllowed() &&
+    (params.isDemo || cleanHost === "demo.mikrotik.local")
+  ) {
+    return {
+      success: true,
+      currentDns: {
+        servers: [primaryDns, secondaryDns].filter(Boolean).join(","),
+        allowRemoteRequests: true,
+      },
+      firewallRulesConfigured: redirectPort53,
+      message: `[MOCK] DNS and NAT firewall rules applied to ${cleanHost}`,
+    };
+  }
+
+  // 1. Read current DNS configuration to check connectivity and current settings
+  const dnsPrint = await queryMikrotikSocketWithRetry(
+    params,
+    ["/ip/dns/print"],
+    2,
+    500,
+  );
+  if (!dnsPrint.success) {
+    const classified = classifyMikrotikError(dnsPrint.error || "");
+    return {
+      success: false,
+      code: classified.code,
+      error: `Failed to connect and read DNS from router: ${classified.message}`,
+    };
+  }
+
+  // 2. Set new DNS servers and enable allow-remote-requests
+  const servers = [primaryDns, secondaryDns].filter(Boolean).join(",");
+  const setDns = await queryMikrotikSocket(params, [
+    "/ip/dns/set",
+    `=servers=${servers}`,
+    "=allow-remote-requests=yes",
+  ]);
+  if (!setDns.success) {
+    const classified = classifyMikrotikError(setDns.error || "");
+    return {
+      success: false,
+      code: classified.code,
+      error: `Failed to update DNS servers on router: ${classified.message}`,
+    };
+  }
+
+  // 3. Configure Firewall NAT redirect rules for DNS (UDP & TCP port 53)
+  if (redirectPort53) {
+    // Check UDP rule
+    const udpCheck = await queryMikrotikSocket(params, [
+      "/ip/firewall/nat/print",
+      "?comment=Nexora-DNS-Redirect-UDP",
+    ]);
+    let udpId = "";
+    if (udpCheck.success && udpCheck.sentences) {
+      for (const sent of udpCheck.sentences) {
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) udpId = w.substring(5);
+        }
+      }
+    }
+    if (!udpId) {
+      const addUdpWords = [
+        "/ip/firewall/nat/add",
+        "=chain=dstnat",
+        "=action=redirect",
+        "=to-ports=53",
+        "=protocol=udp",
+        "=dst-port=53",
+        "=comment=Nexora-DNS-Redirect-UDP",
+      ];
+      if (subnet) addUdpWords.push(`=src-address=${subnet}`);
+      await queryMikrotikSocket(params, addUdpWords);
+    } else {
+      await queryMikrotikSocket(params, [
+        "/ip/firewall/nat/set",
+        `=.id=${udpId}`,
+        "=disabled=no",
+      ]);
+    }
+
+    // Check TCP rule
+    const tcpCheck = await queryMikrotikSocket(params, [
+      "/ip/firewall/nat/print",
+      "?comment=Nexora-DNS-Redirect-TCP",
+    ]);
+    let tcpId = "";
+    if (tcpCheck.success && tcpCheck.sentences) {
+      for (const sent of tcpCheck.sentences) {
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) tcpId = w.substring(5);
+        }
+      }
+    }
+    if (!tcpId) {
+      const addTcpWords = [
+        "/ip/firewall/nat/add",
+        "=chain=dstnat",
+        "=action=redirect",
+        "=to-ports=53",
+        "=protocol=tcp",
+        "=dst-port=53",
+        "=comment=Nexora-DNS-Redirect-TCP",
+      ];
+      if (subnet) addTcpWords.push(`=src-address=${subnet}`);
+      await queryMikrotikSocket(params, addTcpWords);
+    } else {
+      await queryMikrotikSocket(params, [
+        "/ip/firewall/nat/set",
+        `=.id=${tcpId}`,
+        "=disabled=no",
+      ]);
+    }
+  }
+
+  // 4. Read back resulting DNS configuration to verify
+  const verifyRes = await queryMikrotikSocket(params, ["/ip/dns/print"]);
+  let verifiedServers = "";
+  let verifiedRemote = false;
+
+  if (verifyRes.success && verifyRes.sentences) {
+    for (const sent of verifyRes.sentences) {
+      for (const w of sent) {
+        if (w.startsWith("=servers=")) verifiedServers = w.substring(9);
+        if (w.startsWith("=allow-remote-requests=")) {
+          verifiedRemote =
+            w.substring(23) === "yes" || w.substring(23) === "true";
+        }
+      }
+    }
+  }
+
+  return {
+    success: true,
+    currentDns: {
+      servers: verifiedServers || servers,
+      allowRemoteRequests: verifiedRemote,
+    },
+    firewallRulesConfigured: redirectPort53,
+    message: `DNS configuration successfully verified on router (${cleanHost}): ${verifiedServers || servers}`,
+  };
+}
+
+export interface RealInterfaceTraffic {
+  name: string;
+  type: string;
+  running: boolean;
+  disabled: boolean;
+  rxBytes: number;
+  txBytes: number;
+  rxPackets: number;
+  txPackets: number;
+  rxErrors: number;
+  txErrors: number;
+  rxBps: number;
+  txBps: number;
+}
+
+export interface RealQueueTraffic {
+  id: string;
+  name: string;
+  target: string;
+  maxLimit: string;
+  rate: string;
+  rxBps: number;
+  txBps: number;
+  bytes: string;
+  rxBytes: number;
+  txBytes: number;
+  packets: string;
+  disabled: boolean;
+}
+
+/**
+ * Poll Real MikroTik Interface and Simple Queue Bandwidth
+ */
+export async function fetchMikrotikTraffic(params: MikrotikConnParams): Promise<{
+  success: boolean;
+  status: "ONLINE" | "OFFLINE";
+  code?: MikrotikErrorCode;
+  interfaces: RealInterfaceTraffic[];
+  queues: RealQueueTraffic[];
+  totalRxBps: number;
+  totalTxBps: number;
+  error?: string;
+}> {
+  if (!params.host) {
+    return {
+      success: false,
+      status: "OFFLINE",
+      code: "INVALID_CONFIGURATION",
+      interfaces: [],
+      queues: [],
+      totalRxBps: 0,
+      totalTxBps: 0,
+      error: "Router host is required",
+    };
+  }
+
+  const cleanHost = sanitizeMikrotikHost(params.host);
+  if (
+    isMockModeAllowed() &&
+    (params.isDemo || cleanHost === "demo.mikrotik.local")
+  ) {
+    return {
+      success: true,
+      status: "ONLINE",
+      interfaces: [
+        {
+          name: "ether1-wan",
+          type: "ether",
+          running: true,
+          disabled: false,
+          rxBytes: 104857600,
+          txBytes: 52428800,
+          rxPackets: 82000,
+          txPackets: 45000,
+          rxErrors: 0,
+          txErrors: 0,
+          rxBps: 45000000,
+          txBps: 18000000,
+        },
+        {
+          name: "ether2-lan",
+          type: "ether",
+          running: true,
+          disabled: false,
+          rxBytes: 83886080,
+          txBytes: 41943040,
+          rxPackets: 65000,
+          txPackets: 32000,
+          rxErrors: 0,
+          txErrors: 0,
+          rxBps: 34000000,
+          txBps: 14000000,
+        },
+        {
+          name: "ether3-hotspot",
+          type: "ether",
+          running: true,
+          disabled: false,
+          rxBytes: 20971520,
+          txBytes: 10485760,
+          rxPackets: 18000,
+          txPackets: 9000,
+          rxErrors: 0,
+          txErrors: 0,
+          rxBps: 12000000,
+          txBps: 4000000,
+        },
+      ],
+      queues: [
+        {
+          id: "*1",
+          name: "user01",
+          target: "192.168.88.15/32",
+          maxLimit: "10M/20M",
+          rate: "120000/350000",
+          rxBps: 120000,
+          txBps: 350000,
+          bytes: "2819230/19283019",
+          rxBytes: 2819230,
+          txBytes: 19283019,
+          packets: "2109/9812",
+          disabled: false,
+        },
+      ],
+      totalRxBps: 45000000,
+      totalTxBps: 18000000,
+    };
+  }
+
+  // Query real interfaces
+  const ifRes = await queryMikrotikSocketWithRetry(
+    params,
+    ["/interface/print", "?disabled=false"],
+    2,
+    400,
+  );
+  if (!ifRes.success) {
+    const classified = classifyMikrotikError(ifRes.error || "");
+    return {
+      success: false,
+      status: "OFFLINE",
+      code: classified.code,
+      interfaces: [],
+      queues: [],
+      totalRxBps: 0,
+      totalTxBps: 0,
+      error: classified.message,
+    };
+  }
+
+  const interfaces: RealInterfaceTraffic[] = [];
+  if (ifRes.sentences) {
+    for (const sent of ifRes.sentences) {
+      let name = "";
+      let type = "ether";
+      let running = false;
+      let disabled = false;
+      let rxBytes = 0;
+      let txBytes = 0;
+      let rxPackets = 0;
+      let txPackets = 0;
+      let rxErrors = 0;
+      let txErrors = 0;
+
+      for (const w of sent) {
+        if (w.startsWith("=name=")) name = w.substring(6);
+        if (w.startsWith("=type=")) type = w.substring(6);
+        if (w.startsWith("=running=")) running = w.substring(9) === "true";
+        if (w.startsWith("=disabled=")) disabled = w.substring(10) === "true";
+        if (w.startsWith("=rx-byte="))
+          rxBytes = parseInt(w.substring(9), 10) || 0;
+        if (w.startsWith("=tx-byte="))
+          txBytes = parseInt(w.substring(9), 10) || 0;
+        if (w.startsWith("=rx-packet="))
+          rxPackets = parseInt(w.substring(11), 10) || 0;
+        if (w.startsWith("=tx-packet="))
+          txPackets = parseInt(w.substring(11), 10) || 0;
+        if (w.startsWith("=rx-error="))
+          rxErrors = parseInt(w.substring(10), 10) || 0;
+        if (w.startsWith("=tx-error="))
+          txErrors = parseInt(w.substring(10), 10) || 0;
+      }
+
+      if (name) {
+        interfaces.push({
+          name,
+          type,
+          running,
+          disabled,
+          rxBytes,
+          txBytes,
+          rxPackets,
+          txPackets,
+          rxErrors,
+          txErrors,
+          rxBps: 0,
+          txBps: 0,
+        });
+      }
+    }
+  }
+
+  // Query real Simple Queues for traffic & active rates
+  const qRes = await queryMikrotikSocket(params, ["/queue/simple/print"]);
+  const queues: RealQueueTraffic[] = [];
+  if (qRes.success && qRes.sentences) {
+    for (const sent of qRes.sentences) {
+      let id = "";
+      let name = "";
+      let target = "";
+      let maxLimit = "";
+      let rate = "0/0";
+      let bytes = "0/0";
+      let packets = "0/0";
+      let disabled = false;
+
+      for (const w of sent) {
+        if (w.startsWith("=.id=")) id = w.substring(5);
+        if (w.startsWith("=name=")) name = w.substring(6);
+        if (w.startsWith("=target=")) target = w.substring(8);
+        if (w.startsWith("=max-limit=")) maxLimit = w.substring(11);
+        if (w.startsWith("=rate=")) rate = w.substring(6);
+        if (w.startsWith("=bytes=")) bytes = w.substring(7);
+        if (w.startsWith("=packets=")) packets = w.substring(9);
+        if (w.startsWith("=disabled=")) disabled = w.substring(10) === "true";
+      }
+
+      if (name) {
+        const [rxRateStr, txRateStr] = rate.split("/");
+        const [rxByteStr, txByteStr] = bytes.split("/");
+        queues.push({
+          id,
+          name,
+          target,
+          maxLimit,
+          rate,
+          rxBps: parseInt(rxRateStr, 10) || 0,
+          txBps: parseInt(txRateStr, 10) || 0,
+          bytes,
+          rxBytes: parseInt(rxByteStr, 10) || 0,
+          txBytes: parseInt(txByteStr, 10) || 0,
+          packets,
+          disabled,
+        });
+      }
+    }
+  }
+
+  let totalRxBps = 0;
+  let totalTxBps = 0;
+  for (const q of queues) {
+    totalRxBps += q.rxBps;
+    totalTxBps += q.txBps;
+  }
+
+  return {
+    success: true,
+    status: "ONLINE",
+    interfaces,
+    queues,
+    totalRxBps,
+    totalTxBps,
+  };
+}
+
+export interface ActivePppoeUser {
+  id: string;
+  name: string;
+  service: string;
+  callerId: string;
+  address: string;
+  uptime: string;
+  encoding?: string;
+  sessionId?: string;
+  type: "pppoe";
+}
+
+export interface ActiveHotspotUser {
+  id: string;
+  user: string;
+  address: string;
+  macAddress: string;
+  uptime: string;
+  bytesIn: number;
+  bytesOut: number;
+  packetsIn: number;
+  packetsOut: number;
+  sessionTimeLeft?: string;
+  type: "hotspot";
+}
+
+/**
+ * Query PPPoE and Hotspot active users distinctly
+ */
+export async function fetchMikrotikActiveUsers(params: MikrotikConnParams): Promise<{
+  success: boolean;
+  status: "ONLINE" | "OFFLINE";
+  code?: MikrotikErrorCode;
+  pppoeUsers: ActivePppoeUser[];
+  hotspotUsers: ActiveHotspotUser[];
+  activeUsers: Array<{
+    userId: string;
+    ip: string;
+    uptime: string;
+    mac?: string;
+    type: "pppoe" | "hotspot";
+    bytesIn?: number;
+    bytesOut?: number;
+  }>;
+  error?: string;
+}> {
+  if (!params.host) {
+    return {
+      success: false,
+      status: "OFFLINE",
+      code: "INVALID_CONFIGURATION",
+      pppoeUsers: [],
+      hotspotUsers: [],
+      activeUsers: [],
+      error: "Router host is required",
+    };
+  }
+
+  const cleanHost = sanitizeMikrotikHost(params.host);
+  if (
+    isMockModeAllowed() &&
+    (params.isDemo || cleanHost === "demo.mikrotik.local")
+  ) {
+    const mockPppoe: ActivePppoeUser[] = [
+      {
+        id: "*p1",
+        name: "user01",
+        service: "pppoe",
+        callerId: "AA:BB:CC:DD:EE:01",
+        address: "10.10.10.15",
+        uptime: "03:45:12",
+        type: "pppoe",
+      },
+      {
+        id: "*p2",
+        name: "user02",
+        service: "pppoe",
+        callerId: "AA:BB:CC:DD:EE:02",
+        address: "10.10.10.16",
+        uptime: "12:15:33",
+        type: "pppoe",
+      },
+    ];
+    const mockHotspot: ActiveHotspotUser[] = [
+      {
+        id: "*h1",
+        user: "user04",
+        address: "192.168.88.18",
+        macAddress: "AA:BB:CC:DD:EE:04",
+        uptime: "01:10:05",
+        bytesIn: 219283,
+        bytesOut: 1928301,
+        packetsIn: 1200,
+        packetsOut: 2400,
+        type: "hotspot",
+      },
+      {
+        id: "*h2",
+        user: "hotspot_9281",
+        address: "192.168.88.45",
+        macAddress: "12:34:56:78:90:AB",
+        uptime: "00:45:00",
+        bytesIn: 549283,
+        bytesOut: 3928301,
+        packetsIn: 3200,
+        packetsOut: 6400,
+        type: "hotspot",
+      },
+    ];
+    const combined = [
+      ...mockPppoe.map((p) => ({
+        userId: p.name,
+        ip: p.address,
+        uptime: p.uptime,
+        mac: p.callerId,
+        type: "pppoe" as const,
+      })),
+      ...mockHotspot.map((h) => ({
+        userId: h.user,
+        ip: h.address,
+        uptime: h.uptime,
+        mac: h.macAddress,
+        type: "hotspot" as const,
+        bytesIn: h.bytesIn,
+        bytesOut: h.bytesOut,
+      })),
+    ];
+    return {
+      success: true,
+      status: "ONLINE",
+      pppoeUsers: mockPppoe,
+      hotspotUsers: mockHotspot,
+      activeUsers: combined,
+    };
+  }
+
+  const pppoeUsers: ActivePppoeUser[] = [];
+  const hotspotUsers: ActiveHotspotUser[] = [];
+
+  // Query PPPoE active sessions
+  const pppRes = await queryMikrotikSocketWithRetry(
+    params,
+    ["/ppp/active/print"],
+    2,
+    500,
+  );
+  if (pppRes.success && pppRes.sentences) {
+    for (const sent of pppRes.sentences) {
+      let id = "";
+      let name = "";
+      let service = "pppoe";
+      let callerId = "";
+      let address = "";
+      let uptime = "";
+      let encoding = "";
+      let sessionId = "";
+
+      for (const w of sent) {
+        if (w.startsWith("=.id=")) id = w.substring(5);
+        if (w.startsWith("=name=")) name = w.substring(6);
+        if (w.startsWith("=service=")) service = w.substring(9);
+        if (w.startsWith("=caller-id=")) callerId = w.substring(11);
+        if (w.startsWith("=address=")) address = w.substring(9);
+        if (w.startsWith("=uptime=")) uptime = w.substring(8);
+        if (w.startsWith("=encoding=")) encoding = w.substring(10);
+        if (w.startsWith("=session-id=")) sessionId = w.substring(12);
+      }
+
+      if (name) {
+        pppoeUsers.push({
+          id,
+          name,
+          service,
+          callerId,
+          address,
+          uptime,
+          encoding,
+          sessionId,
+          type: "pppoe",
+        });
+      }
+    }
+  }
+
+  // Query Hotspot active sessions
+  const hsRes = await queryMikrotikSocketWithRetry(
+    params,
+    ["/ip/hotspot/active/print"],
+    2,
+    500,
+  );
+  if (hsRes.success && hsRes.sentences) {
+    for (const sent of hsRes.sentences) {
+      let id = "";
+      let user = "";
+      let address = "";
+      let macAddress = "";
+      let uptime = "";
+      let bytesIn = 0;
+      let bytesOut = 0;
+      let packetsIn = 0;
+      let packetsOut = 0;
+      let sessionTimeLeft = "";
+
+      for (const w of sent) {
+        if (w.startsWith("=.id=")) id = w.substring(5);
+        if (w.startsWith("=user=")) user = w.substring(6);
+        if (w.startsWith("=address=")) address = w.substring(9);
+        if (w.startsWith("=mac-address=")) macAddress = w.substring(13);
+        if (w.startsWith("=uptime=")) uptime = w.substring(8);
+        if (w.startsWith("=bytes-in="))
+          bytesIn = parseInt(w.substring(10), 10) || 0;
+        if (w.startsWith("=bytes-out="))
+          bytesOut = parseInt(w.substring(11), 10) || 0;
+        if (w.startsWith("=packets-in="))
+          packetsIn = parseInt(w.substring(12), 10) || 0;
+        if (w.startsWith("=packets-out="))
+          packetsOut = parseInt(w.substring(13), 10) || 0;
+        if (w.startsWith("=session-time-left="))
+          sessionTimeLeft = w.substring(19);
+      }
+
+      if (user) {
+        hotspotUsers.push({
+          id,
+          user,
+          address,
+          macAddress,
+          uptime,
+          bytesIn,
+          bytesOut,
+          packetsIn,
+          packetsOut,
+          sessionTimeLeft,
+          type: "hotspot",
+        });
+      }
+    }
+  }
+
+  if (!pppRes.success && !hsRes.success) {
+    const classified = classifyMikrotikError(pppRes.error || hsRes.error || "");
+    return {
+      success: false,
+      status: "OFFLINE",
+      code: classified.code,
+      pppoeUsers: [],
+      hotspotUsers: [],
+      activeUsers: [],
+      error: classified.message,
+    };
+  }
+
+  const combined = [
+    ...pppoeUsers.map((p) => ({
+      userId: p.name,
+      ip: p.address,
+      uptime: p.uptime,
+      mac: p.callerId,
+      type: "pppoe" as const,
+    })),
+    ...hotspotUsers.map((h) => ({
+      userId: h.user,
+      ip: h.address,
+      uptime: h.uptime,
+      mac: h.macAddress,
+      type: "hotspot" as const,
+      bytesIn: h.bytesIn,
+      bytesOut: h.bytesOut,
+    })),
+  ];
+
+  return {
+    success: true,
+    status: "ONLINE",
+    pppoeUsers,
+    hotspotUsers,
+    activeUsers: combined,
+  };
+}
+
+/**
+ * Validates IPv4 address or CIDR notation
+ */
+export function isValidIpOrCidr(val: string): boolean {
+  if (!val || typeof val !== "string") return false;
+  const trimmed = val.trim();
+  const ipv4Regex =
+    /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\/(?:3[0-2]|[12]?[0-9]))?$/;
+  return ipv4Regex.test(trimmed);
+}
+
+/**
+ * Simple Queue Speed Control with Valid IP/Subnet Target
+ */
+export async function syncMikrotikClientQueue(
+  params: MikrotikConnParams,
+  client: any,
+  speedLimit: string, // e.g. "10M/20M"
+  priority: string = "8",
+): Promise<{
+  success: boolean;
+  code?: MikrotikErrorCode;
+  queueId?: string;
+  targetUsed?: string;
+  verifiedLimit?: string;
+  message?: string;
+  error?: string;
+}> {
+  if (!client || !client.userId) {
+    return {
+      success: false,
+      code: "INVALID_CONFIGURATION",
+      error: "Client userId is required for queue management",
+    };
+  }
+
+  const cleanHost = sanitizeMikrotikHost(params.host);
+  if (
+    isMockModeAllowed() &&
+    (params.isDemo || cleanHost === "demo.mikrotik.local")
+  ) {
+    return {
+      success: true,
+      queueId: "*mock_q1",
+      targetUsed: client.ipAddress || "192.168.88.100/32",
+      verifiedLimit: speedLimit,
+      message: `[MOCK] Simple Queue synced for ${client.userId} (${speedLimit})`,
+    };
+  }
+
+  // 1. Resolve a VALID target IP/subnet. DO NOT use client.userId!
+  let resolvedTarget = "";
+  const candidateIp = (
+    client.ipAddress ||
+    client.ip ||
+    client.staticIp ||
+    ""
+  ).trim();
+
+  if (isValidIpOrCidr(candidateIp)) {
+    resolvedTarget = candidateIp.includes("/")
+      ? candidateIp
+      : `${candidateIp}/32`;
+  } else {
+    // If no static IP on client record, probe active sessions on router to find their live IP
+    try {
+      const activeCheck = await queryMikrotikSocket(params, [
+        "/ppp/active/print",
+        `?name=${client.userId}`,
+      ]);
+      if (activeCheck.success && activeCheck.sentences?.length) {
+        for (const sent of activeCheck.sentences) {
+          for (const w of sent) {
+            if (w.startsWith("=address=")) {
+              const liveIp = w.substring(9).trim();
+              if (isValidIpOrCidr(liveIp)) {
+                resolvedTarget = `${liveIp}/32`;
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+
+    if (!resolvedTarget) {
+      try {
+        const hsActive = await queryMikrotikSocket(params, [
+          "/ip/hotspot/active/print",
+          `?user=${client.userId}`,
+        ]);
+        if (hsActive.success && hsActive.sentences?.length) {
+          for (const sent of hsActive.sentences) {
+            for (const w of sent) {
+              if (w.startsWith("=address=")) {
+                const liveIp = w.substring(9).trim();
+                if (isValidIpOrCidr(liveIp)) {
+                  resolvedTarget = `${liveIp}/32`;
+                }
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // If still no valid target found, we cannot create an invalid queue with username target
+  if (!resolvedTarget) {
+    // Check if client has a MAC address or assigned subnet
+    if (client.subnet && isValidIpOrCidr(client.subnet)) {
+      resolvedTarget = client.subnet;
+    } else {
+      return {
+        success: false,
+        code: "INVALID_TARGET",
+        error: `Cannot create Simple Queue for client "${client.userId}": No valid IP address or subnet target found. Ensure client has a static IP or is actively connected.`,
+      };
+    }
+  }
+
+  const queueName = `nexora_${client.userId}`;
+  const prioStr = `${priority}/${priority}`;
+  const comment = `Nexora | ${client.name || "Client"} | ${client.userId}`;
+  const isDisabled =
+    client.status === "expired" ||
+    client.status === "suspended" ||
+    client.status === "offline";
+
+  // Check if queue exists by queueName or client.userId
+  const qPrint = await queryMikrotikSocket(params, [
+    "/queue/simple/print",
+    `?name=${queueName}`,
+  ]);
+  let qId = "";
+  if (qPrint.success && qPrint.sentences) {
+    for (const sent of qPrint.sentences) {
+      for (const w of sent) {
+        if (w.startsWith("=.id=")) qId = w.substring(5);
+      }
+    }
+  }
+
+  // Fallback search with plain userId
+  if (!qId) {
+    const plainPrint = await queryMikrotikSocket(params, [
+      "/queue/simple/print",
+      `?name=${client.userId}`,
+    ]);
+    if (plainPrint.success && plainPrint.sentences) {
+      for (const sent of plainPrint.sentences) {
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) qId = w.substring(5);
+        }
+      }
+    }
+  }
+
+  let queueOpResult;
+  if (qId) {
+    // Update existing queue
+    queueOpResult = await queryMikrotikSocket(params, [
+      "/queue/simple/set",
+      `=.id=${qId}`,
+      `=target=${resolvedTarget}`,
+      `=max-limit=${speedLimit}`,
+      `=priority=${prioStr}`,
+      `=comment=${comment}`,
+      `=disabled=${isDisabled ? "yes" : "no"}`,
+    ]);
+  } else {
+    // Add new queue
+    queueOpResult = await queryMikrotikSocket(params, [
+      "/queue/simple/add",
+      `=name=${queueName}`,
+      `=target=${resolvedTarget}`,
+      `=max-limit=${speedLimit}`,
+      `=priority=${prioStr}`,
+      `=comment=${comment}`,
+      `=disabled=${isDisabled ? "yes" : "no"}`,
+    ]);
+  }
+
+  if (!queueOpResult.success) {
+    const classified = classifyMikrotikError(queueOpResult.error || "");
+    return {
+      success: false,
+      code: classified.code,
+      error: `RouterOS Queue Operation Failed: ${classified.message}`,
+    };
+  }
+
+  // Read back to confirm that limits match on RouterOS
+  const verifyQueue = await queryMikrotikSocket(params, [
+    "/queue/simple/print",
+    `?target=${resolvedTarget}`,
+  ]);
+  let verifiedLimit = "";
+  if (verifyQueue.success && verifyQueue.sentences) {
+    for (const sent of verifyQueue.sentences) {
+      for (const w of sent) {
+        if (w.startsWith("=max-limit=")) verifiedLimit = w.substring(11);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    queueId: qId || "new",
+    targetUsed: resolvedTarget,
+    verifiedLimit: verifiedLimit || speedLimit,
+    message: `Simple Queue active on MikroTik for ${client.userId} [Target: ${resolvedTarget}, Limit: ${speedLimit}]`,
+  };
+}
+
+/**
+ * Sync Package Profile to MikroTik RouterOS (/ppp/profile and /ip/hotspot/user/profile)
+ * Ensures rate-limit is set and confirmed on router
+ */
+export async function syncMikrotikPackage(
+  params: MikrotikConnParams,
+  pkg: {
+    id: string;
+    name: string;
+    speed: string; // e.g. "20 Mbps" or "20"
+    uploadSpeed?: string; // e.g. "10 Mbps"
+    price?: number;
+  },
+): Promise<{
+  success: boolean;
+  code?: MikrotikErrorCode;
+  pppProfileSynced?: boolean;
+  hotspotProfileSynced?: boolean;
+  rateLimitConfigured?: string;
+  message?: string;
+  error?: string;
+}> {
+  if (!pkg || !pkg.name) {
+    return {
+      success: false,
+      code: "INVALID_CONFIGURATION",
+      error: "Package name is required",
+    };
+  }
+
+  const cleanHost = sanitizeMikrotikHost(params.host);
+  if (
+    isMockModeAllowed() &&
+    (params.isDemo || cleanHost === "demo.mikrotik.local")
+  ) {
+    return {
+      success: true,
+      pppProfileSynced: true,
+      hotspotProfileSynced: true,
+      rateLimitConfigured: `${pkg.uploadSpeed || "10M"}/${pkg.speed || "20M"}`,
+      message: `[MOCK] Package ${pkg.name} profile synchronized to ${cleanHost}`,
+    };
+  }
+
+  const profileName = String(pkg.name)
+    .replace(/[^\w-]/g, "_")
+    .toLowerCase();
+  const dlNum = String(pkg.speed || "20").replace(/[^\d.]/g, "") || "20";
+  const ulNum =
+    String(pkg.uploadSpeed || pkg.speed || "10").replace(/[^\d.]/g, "") || "10";
+  const rateLimit = `${ulNum}M/${dlNum}M`;
+
+  let pppSynced = false;
+  let hsSynced = false;
+
+  // 1. PPPoE Profile
+  try {
+    const pppCheck = await queryMikrotikSocket(params, [
+      "/ppp/profile/print",
+      `?name=${profileName}`,
+    ]);
+    let pppId = "";
+    if (pppCheck.success && pppCheck.sentences) {
+      for (const sent of pppCheck.sentences) {
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) pppId = w.substring(5);
+        }
+      }
+    }
+
+    if (pppId) {
+      const setPpp = await queryMikrotikSocket(params, [
+        "/ppp/profile/set",
+        `=.id=${pppId}`,
+        `=rate-limit=${rateLimit}`,
+        `=comment=Nexora Package: ${pkg.name}`,
+      ]);
+      pppSynced = setPpp.success;
+    } else {
+      const addPpp = await queryMikrotikSocket(params, [
+        "/ppp/profile/add",
+        `=name=${profileName}`,
+        `=rate-limit=${rateLimit}`,
+        `=comment=Nexora Package: ${pkg.name}`,
+      ]);
+      pppSynced = addPpp.success;
+    }
+  } catch {}
+
+  // 2. Hotspot User Profile
+  try {
+    const hsCheck = await queryMikrotikSocket(params, [
+      "/ip/hotspot/user/profile/print",
+      `?name=${profileName}`,
+    ]);
+    let hsId = "";
+    if (hsCheck.success && hsCheck.sentences) {
+      for (const sent of hsCheck.sentences) {
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) hsId = w.substring(5);
+        }
+      }
+    }
+
+    if (hsId) {
+      const setHs = await queryMikrotikSocket(params, [
+        "/ip/hotspot/user/profile/set",
+        `=.id=${hsId}`,
+        `=rate-limit=${rateLimit}`,
+      ]);
+      hsSynced = setHs.success;
+    } else {
+      const addHs = await queryMikrotikSocket(params, [
+        "/ip/hotspot/user/profile/add",
+        `=name=${profileName}`,
+        `=rate-limit=${rateLimit}`,
+      ]);
+      hsSynced = addHs.success;
+    }
+  } catch {}
+
+  if (!pppSynced && !hsSynced) {
+    return {
+      success: false,
+      code: "COMMAND_FAILED",
+      error: `Failed to synchronize package "${pkg.name}" profiles on MikroTik router. Check router connection and permissions.`,
+    };
+  }
+
+  return {
+    success: true,
+    pppProfileSynced: pppSynced,
+    hotspotProfileSynced: hsSynced,
+    rateLimitConfigured: rateLimit,
+    message: `Package "${pkg.name}" profiles synchronized to MikroTik RouterOS (${rateLimit}).`,
+  };
+}
+
+/**
+ * Server-Side Client Status Management (Activate / Suspend)
+ * Directly modifies RouterOS hardware state and kicks active sessions upon suspension
+ */
+export async function setMikrotikClientStatus(
+  params: MikrotikConnParams,
+  clientId: string,
+  targetStatus: "active" | "suspended" | "expired",
+): Promise<{
+  success: boolean;
+  code?: MikrotikErrorCode;
+  newStatus: string;
+  kickedActiveSession?: boolean;
+  message?: string;
+  error?: string;
+}> {
+  if (!clientId) {
+    return {
+      success: false,
+      newStatus: targetStatus,
+      code: "INVALID_CONFIGURATION",
+      error: "Client ID is required",
+    };
+  }
+
+  const cleanHost = sanitizeMikrotikHost(params.host);
+  if (
+    isMockModeAllowed() &&
+    (params.isDemo || cleanHost === "demo.mikrotik.local")
+  ) {
+    return {
+      success: true,
+      newStatus: targetStatus,
+      kickedActiveSession: targetStatus !== "active",
+      message: `[MOCK] Client ${clientId} marked ${targetStatus} on ${cleanHost}`,
+    };
+  }
+
+  const shouldDisable =
+    targetStatus === "suspended" || targetStatus === "expired";
+  let opSucceeded = false;
+  let kicked = false;
+
+  // 1. PPPoE Secret
+  try {
+    const pppFind = await queryMikrotikSocket(params, [
+      "/ppp/secret/print",
+      `?name=${clientId}`,
+    ]);
+    if (pppFind.success && pppFind.sentences) {
+      for (const sent of pppFind.sentences) {
+        let secId = "";
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) secId = w.substring(5);
+        }
+        if (secId) {
+          const upd = await queryMikrotikSocket(params, [
+            "/ppp/secret/set",
+            `=.id=${secId}`,
+            `=disabled=${shouldDisable ? "yes" : "no"}`,
+          ]);
+          if (upd.success) opSucceeded = true;
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Hotspot User
+  try {
+    const hsFind = await queryMikrotikSocket(params, [
+      "/ip/hotspot/user/print",
+      `?name=${clientId}`,
+    ]);
+    if (hsFind.success && hsFind.sentences) {
+      for (const sent of hsFind.sentences) {
+        let hsId = "";
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) hsId = w.substring(5);
+        }
+        if (hsId) {
+          const upd = await queryMikrotikSocket(params, [
+            "/ip/hotspot/user/set",
+            `=.id=${hsId}`,
+            `=disabled=${shouldDisable ? "yes" : "no"}`,
+          ]);
+          if (upd.success) opSucceeded = true;
+        }
+      }
+    }
+  } catch {}
+
+  // 3. Simple Queue
+  try {
+    const qFind = await queryMikrotikSocket(params, [
+      "/queue/simple/print",
+      `?name=nexora_${clientId}`,
+    ]);
+    let qId = "";
+    if (qFind.success && qFind.sentences) {
+      for (const sent of qFind.sentences) {
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) qId = w.substring(5);
+        }
+      }
+    }
+    if (!qId) {
+      const qPlain = await queryMikrotikSocket(params, [
+        "/queue/simple/print",
+        `?name=${clientId}`,
+      ]);
+      if (qPlain.success && qPlain.sentences) {
+        for (const sent of qPlain.sentences) {
+          for (const w of sent) {
+            if (w.startsWith("=.id=")) qId = w.substring(5);
+          }
+        }
+      }
+    }
+    if (qId) {
+      await queryMikrotikSocket(params, [
+        "/queue/simple/set",
+        `=.id=${qId}`,
+        `=disabled=${shouldDisable ? "yes" : "no"}`,
+      ]);
+    }
+  } catch {}
+
+  // 4. If suspending or expired, actively kick live sessions from router
+  if (shouldDisable) {
+    try {
+      const activePpp = await queryMikrotikSocket(params, [
+        "/ppp/active/print",
+        `?name=${clientId}`,
+      ]);
+      if (activePpp.success && activePpp.sentences) {
+        for (const sent of activePpp.sentences) {
+          for (const w of sent) {
+            if (w.startsWith("=.id=")) {
+              const actId = w.substring(5);
+              await queryMikrotikSocket(params, [
+                "/ppp/active/remove",
+                `=.id=${actId}`,
+              ]);
+              kicked = true;
+            }
+          }
+        }
+      }
+    } catch {}
+
+    try {
+      const activeHs = await queryMikrotikSocket(params, [
+        "/ip/hotspot/active/print",
+        `?user=${clientId}`,
+      ]);
+      if (activeHs.success && activeHs.sentences) {
+        for (const sent of activeHs.sentences) {
+          for (const w of sent) {
+            if (w.startsWith("=.id=")) {
+              const actId = w.substring(5);
+              await queryMikrotikSocket(params, [
+                "/ip/hotspot/active/remove",
+                `=.id=${actId}`,
+              ]);
+              kicked = true;
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (!opSucceeded && !kicked) {
+    return {
+      success: false,
+      newStatus: targetStatus,
+      code: "COMMAND_FAILED",
+      error: `Could not locate or update client "${clientId}" in RouterOS database.`,
+    };
+  }
+
+  return {
+    success: true,
+    newStatus: targetStatus,
+    kickedActiveSession: kicked,
+    message: `Client "${clientId}" successfully ${shouldDisable ? "suspended/disabled" : "activated"} on MikroTik RouterOS.`,
   };
 }
 

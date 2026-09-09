@@ -205,8 +205,10 @@ export const LiveNetworkTraffic: React.FC<LiveNetworkTrafficProps> = ({
  const [activeTab, setActiveTab] = useState<InterfaceTabId>('ether1-wan');
  const [chartType, setChartType] = useState<'area' | 'line'>('area');
  const [isPaused, setIsPaused] = useState<boolean>(false);
+ const [connectionStatus, setConnectionStatus] = useState<'CONNECTED' | 'OFFLINE' | 'CHECKING'>('CHECKING');
+ const [lastTelemetryError, setLastTelemetryError] = useState<string | null>(null);
 
- // Initialize 30 sliding data points per interface
+ // Initialize 30 sliding data points per interface (all zeroed, no random noise)
  const [interfaceData, setInterfaceData] = useState<Record<InterfaceTabId, RechartsDataPoint[]>>(() => {
  const now = Date.now();
  const result: Record<InterfaceTabId, RechartsDataPoint[]> = {
@@ -216,33 +218,22 @@ export const LiveNetworkTraffic: React.FC<LiveNetworkTrafficProps> = ({
  all: [],
  };
 
- const baseProfiles: Record<InterfaceTabId, { dl: number; ul: number }> = {
- 'ether1-wan': { dl: 56, ul: 24 },
- 'ether2-lan': { dl: 42, ul: 18 },
- 'ether3-hotspot': { dl: 18, ul: 8 },
- all: { dl: 68, ul: 30 },
- };
-
  for (let i = 29; i >= 0; i--) {
- const timeStr = new Date(now - i * 1500).toLocaleTimeString([], {
+ const timeStr = new Date(now - i * 2000).toLocaleTimeString([], {
  hour: '2-digit',
  minute: '2-digit',
  second: '2-digit',
  });
 
  (Object.keys(result) as InterfaceTabId[]).forEach((id) => {
- const { dl: baseDl, ul: baseUl } = baseProfiles[id];
- const dl = Math.max(2, Math.min(100, baseDl + Math.sin((i + id.length) * 0.4) * 16 + (Math.random() * 8 - 4)));
- const ul = Math.max(1, Math.min(50, baseUl + Math.cos((i + id.length) * 0.4) * 8 + (Math.random() * 6 - 3)));
-
  result[id].push({
  time: timeStr,
- download: parseFloat(dl.toFixed(1)),
- upload: parseFloat(ul.toFixed(1)),
- combined: parseFloat((dl + ul).toFixed(1)),
- rxPkts: Math.floor(dl * 260 + Math.random() * 300),
- txPkts: Math.floor(ul * 220 + Math.random() * 200),
- ping: Math.floor(2 + Math.random() * 3),
+ download: 0,
+ upload: 0,
+ combined: 0,
+ rxPkts: 0,
+ txPkts: 0,
+ ping: 0,
  });
  });
  }
@@ -260,17 +251,41 @@ export const LiveNetworkTraffic: React.FC<LiveNetworkTrafficProps> = ({
  txPkts: number;
  ping: number;
  }>>({
- 'ether1-wan': { rx: 58.4, tx: 25.2, peakRx: 88.5, peakTx: 39.4, rxPkts: 15400, txPkts: 7600, ping: 3 },
- 'ether2-lan': { rx: 44.2, tx: 19.1, peakRx: 68.2, peakTx: 29.8, rxPkts: 11800, txPkts: 5900, ping: 2 },
- 'ether3-hotspot': { rx: 19.5, tx: 8.2, peakRx: 36.8, peakTx: 14.5, rxPkts: 5100, txPkts: 2200, ping: 4 },
- all: { rx: 69.1, tx: 29.8, peakRx: 96.2, peakTx: 45.1, rxPkts: 18900, txPkts: 9300, ping: 3 },
+ 'ether1-wan': { rx: 0, tx: 0, peakRx: 0, peakTx: 0, rxPkts: 0, txPkts: 0, ping: 0 },
+ 'ether2-lan': { rx: 0, tx: 0, peakRx: 0, peakTx: 0, rxPkts: 0, txPkts: 0, ping: 0 },
+ 'ether3-hotspot': { rx: 0, tx: 0, peakRx: 0, peakTx: 0, rxPkts: 0, txPkts: 0, ping: 0 },
+ all: { rx: 0, tx: 0, peakRx: 0, peakTx: 0, rxPkts: 0, txPkts: 0, ping: 0 },
  });
 
- // Live simulation tick update
+ // Real MikroTik Telemetry Polling (No fake curves or Math.random)
  useEffect(() => {
- if (!routerConfig.connected || isPaused) return;
+ if (!routerConfig.connected || isPaused) {
+ setConnectionStatus('OFFLINE');
+ return;
+ }
 
- const interval = setInterval(() => {
+ let isMounted = true;
+
+ const pollTraffic = async () => {
+ try {
+ const res = await fetch('/api/mikrotik/traffic', {
+ method: 'POST',
+ headers: { 'Content-Type': 'application/json' },
+ body: JSON.stringify({
+ router: {
+ ip: routerConfig.ip,
+ apiPort: Number(routerConfig.port) || 8728,
+ username: (routerConfig as any).user || (routerConfig as any).username || 'admin',
+ password: (routerConfig as any).password || '',
+ connected: routerConfig.connected,
+ isDemo: (routerConfig as any).isDemo,
+ },
+ }),
+ });
+
+ if (!isMounted) return;
+ const data = await res.json();
+
  const now = new Date();
  const timeStr = now.toLocaleTimeString([], {
  hour: '2-digit',
@@ -278,29 +293,53 @@ export const LiveNetworkTraffic: React.FC<LiveNetworkTrafficProps> = ({
  second: '2-digit',
  });
 
- setInterfaceData((prev) => {
- const next: Record<InterfaceTabId, RechartsDataPoint[]> = { ...prev };
+ if (data.success && data.status === 'CONNECTED') {
+ setConnectionStatus('CONNECTED');
+ setLastTelemetryError(null);
 
- // Calculate dynamic live traffic
- const wanDl = Math.max(5, Math.min(98, 48 + Math.sin(Date.now() / 2500) * 22 + (Math.random() * 16 - 8)));
- const wanUl = Math.max(2, Math.min(48, 20 + Math.cos(Date.now() / 2500) * 9 + (Math.random() * 6 - 3)));
+ const ifaceMap: Record<string, { rxBps: number; txBps: number; rxPps: number; txPps: number }> = {};
+ if (Array.isArray(data.interfaces)) {
+ data.interfaces.forEach((iface: any) => {
+ ifaceMap[String(iface.name).toLowerCase()] = {
+ rxBps: Number(iface.rxBps) || 0,
+ txBps: Number(iface.txBps) || 0,
+ rxPps: Number(iface.rxPacketsPerSec) || 0,
+ txPps: Number(iface.txPacketsPerSec) || 0,
+ };
+ });
+ }
 
- const lanDl = Math.max(4, Math.min(85, wanDl * 0.74 + (Math.random() * 5 - 2.5)));
- const lanUl = Math.max(1, Math.min(40, wanUl * 0.70 + (Math.random() * 4 - 2)));
-
- const hsDl = Math.max(1, Math.min(42, wanDl * 0.26 + (Math.random() * 4 - 2)));
- const hsUl = Math.max(0.5, Math.min(20, wanUl * 0.24 + (Math.random() * 2 - 1)));
-
- const allDl = parseFloat(wanDl.toFixed(1));
- const allUl = parseFloat(wanUl.toFixed(1));
-
- const newVals: Record<InterfaceTabId, { dl: number; ul: number }> = {
- 'ether1-wan': { dl: parseFloat(wanDl.toFixed(1)), ul: parseFloat(wanUl.toFixed(1)) },
- 'ether2-lan': { dl: parseFloat(lanDl.toFixed(1)), ul: parseFloat(lanUl.toFixed(1)) },
- 'ether3-hotspot': { dl: parseFloat(hsDl.toFixed(1)), ul: parseFloat(hsUl.toFixed(1)) },
- all: { dl: allDl, ul: allUl },
+ const findStats = (tabId: InterfaceTabId) => {
+ if (tabId === 'all') {
+ return {
+ rxMbps: parseFloat(((Number(data.totalRxBps) || 0) / 1000000).toFixed(2)),
+ txMbps: parseFloat(((Number(data.totalTxBps) || 0) / 1000000).toFixed(2)),
+ rxPps: 0,
+ txPps: 0,
+ };
+ }
+ const key = tabId.replace('-wan', '').replace('-lan', '').replace('-hotspot', '');
+ const match = ifaceMap[tabId] || ifaceMap[key] || Object.entries(ifaceMap).find(([k]) => k.includes(key))?.[1];
+ if (match) {
+ return {
+ rxMbps: parseFloat(((match.rxBps || 0) / 1000000).toFixed(2)),
+ txMbps: parseFloat(((match.txBps || 0) / 1000000).toFixed(2)),
+ rxPps: match.rxPps || 0,
+ txPps: match.txPps || 0,
+ };
+ }
+ return { rxMbps: 0, txMbps: 0, rxPps: 0, txPps: 0 };
  };
 
+ const newVals: Record<InterfaceTabId, { dl: number; ul: number; rxPkts: number; txPkts: number }> = {
+ 'ether1-wan': { dl: findStats('ether1-wan').rxMbps, ul: findStats('ether1-wan').txMbps, rxPkts: findStats('ether1-wan').rxPps, txPkts: findStats('ether1-wan').txPps },
+ 'ether2-lan': { dl: findStats('ether2-lan').rxMbps, ul: findStats('ether2-lan').txMbps, rxPkts: findStats('ether2-lan').rxPps, txPkts: findStats('ether2-lan').txPps },
+ 'ether3-hotspot': { dl: findStats('ether3-hotspot').rxMbps, ul: findStats('ether3-hotspot').txMbps, rxPkts: findStats('ether3-hotspot').rxPps, txPkts: findStats('ether3-hotspot').txPps },
+ all: { dl: findStats('all').rxMbps, ul: findStats('all').txMbps, rxPkts: 0, txPkts: 0 },
+ };
+
+ setInterfaceData((prev) => {
+ const next: Record<InterfaceTabId, RechartsDataPoint[]> = { ...prev };
  (Object.keys(next) as InterfaceTabId[]).forEach((tab) => {
  const list = next[tab] || [];
  const pts = [...list.slice(1)];
@@ -310,39 +349,77 @@ export const LiveNetworkTraffic: React.FC<LiveNetworkTrafficProps> = ({
  time: timeStr,
  download: dl,
  upload: ul,
- combined: parseFloat((dl + ul).toFixed(1)),
- rxPkts: Math.floor(dl * 260 + Math.random() * 300),
- txPkts: Math.floor(ul * 220 + Math.random() * 200),
- ping: Math.floor(2 + Math.random() * 3),
+ combined: parseFloat((dl + ul).toFixed(2)),
+ rxPkts: newVals[tab].rxPkts,
+ txPkts: newVals[tab].txPkts,
+ ping: 1,
  });
  next[tab] = pts;
  });
+ return next;
+ });
 
- // Update live metrics HUD
  setLiveMetrics((prevMetrics) => {
  const updated = { ...prevMetrics };
  (Object.keys(newVals) as InterfaceTabId[]).forEach((tab) => {
- const { dl, ul } = newVals[tab];
- const old = prevMetrics[tab] || { rx: dl, tx: ul, peakRx: dl, peakTx: ul, rxPkts: 5000, txPkts: 2000, ping: 3 };
+ const { dl, ul, rxPkts, txPkts } = newVals[tab];
+ const old = prevMetrics[tab] || { rx: dl, tx: ul, peakRx: dl, peakTx: ul, rxPkts: 0, txPkts: 0, ping: 1 };
  updated[tab] = {
  rx: dl,
  tx: ul,
  peakRx: Math.max(old.peakRx, dl),
  peakTx: Math.max(old.peakTx, ul),
- rxPkts: Math.floor(dl * 260 + Math.random() * 300),
- txPkts: Math.floor(ul * 220 + Math.random() * 200),
- ping: Math.floor(2 + Math.random() * 3),
+ rxPkts,
+ txPkts,
+ ping: 1,
  };
  });
  return updated;
  });
-
+ } else {
+ setConnectionStatus('OFFLINE');
+ setLastTelemetryError(data.error || 'Router unreachable');
+ setInterfaceData((prev) => {
+ const next: Record<InterfaceTabId, RechartsDataPoint[]> = { ...prev };
+ (Object.keys(next) as InterfaceTabId[]).forEach((tab) => {
+ const list = next[tab] || [];
+ const pts = [...list.slice(1)];
+ pts.push({
+ time: timeStr,
+ download: 0,
+ upload: 0,
+ combined: 0,
+ rxPkts: 0,
+ txPkts: 0,
+ ping: 0,
+ });
+ next[tab] = pts;
+ });
  return next;
  });
- }, 1400);
+ setLiveMetrics((prev) => {
+ const next = { ...prev };
+ (Object.keys(next) as InterfaceTabId[]).forEach((tab) => {
+ next[tab] = { ...next[tab], rx: 0, tx: 0, rxPkts: 0, txPkts: 0 };
+ });
+ return next;
+ });
+ }
+ } catch (err: any) {
+ if (!isMounted) return;
+ setConnectionStatus('OFFLINE');
+ setLastTelemetryError(err.message || 'Telemetry network failure');
+ }
+ };
 
- return () => clearInterval(interval);
- }, [routerConfig.connected, isPaused]);
+ pollTraffic();
+ const interval = setInterval(pollTraffic, 2500);
+
+ return () => {
+ isMounted = false;
+ clearInterval(interval);
+ };
+ }, [routerConfig.ip, routerConfig.port, routerConfig.connected, isPaused]);
 
  // Current selected tab metadata and stream
  const activeDef = useMemo(() => {

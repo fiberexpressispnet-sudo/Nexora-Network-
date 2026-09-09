@@ -1064,7 +1064,13 @@ export function MainApp({
 
   const handleUpdateRouter = (updated: MikrotikRouter) => {
     const prevRouter = routers.find((r) => r.id === updated.id);
-    setRouters((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    setRouters((prev) => {
+      const exists = prev.some((r) => r.id === updated.id);
+      if (exists) {
+        return prev.map((r) => (r.id === updated.id ? updated : r));
+      }
+      return [...prev, updated];
+    });
     if (prevRouter && prevRouter.name !== updated.name) {
       setClients((prevClients) =>
         prevClients.map((c) => {
