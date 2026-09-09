@@ -16,6 +16,7 @@ import {
   isMockModeAllowed,
   classifyMikrotikError,
   executeMikrotikReboot,
+  executeMikrotikPing,
   configureMikrotikDns,
   fetchMikrotikTraffic,
   fetchMikrotikActiveUsers,
@@ -122,7 +123,7 @@ async function startServer() {
       }
 
       const cleanHost = sanitizeMikrotikHost(params.host);
-      const isExplicitDemo = (process.env.MIKROTIK_MOCK_MODE === "true") || (Boolean(params.isDemo) || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
+      const isExplicitDemo = isMockModeAllowed() && (Boolean(params.isDemo) || cleanHost === 'demo.mikrotik.local');
 
       if (isExplicitDemo) {
         const simInfo = getSimulatedRouterOS6Info({ ...params, host: cleanHost, isDemo: true });
@@ -144,7 +145,7 @@ async function startServer() {
         if (socketResult.success && socketResult.sentences && socketResult.sentences.length > 0) {
           let version = 'RouterOS';
           let uptime = 'Online';
-          let cpuLoad = '10%';
+          let cpuLoad = '0%';
           let freeRamBytes = 0;
           let totalRamBytes = 0;
           let boardName = 'MikroTik Router';
@@ -158,9 +159,81 @@ async function startServer() {
             if (word.startsWith('=board-name=')) boardName = word.substring(12);
           }
 
-          const freeRamMB = totalRamBytes > 0 ? Math.round(freeRamBytes / 1048576) : 256;
-          const totalRamMB = totalRamBytes > 0 ? Math.round(totalRamBytes / 1048576) : 1024;
-          const usedRamMB = totalRamMB - freeRamMB;
+          const freeRamMB = totalRamBytes > 0 ? Math.round(freeRamBytes / 1048576) : 0;
+          const totalRamMB = totalRamBytes > 0 ? Math.round(totalRamBytes / 1048576) : 0;
+          const usedRamMB = totalRamMB > 0 ? Math.max(0, totalRamMB - freeRamMB) : 0;
+
+          // Query live DNS settings
+          let currentPrimaryDns = '';
+          let currentSecondaryDns = '';
+          let allowRemoteRequests = false;
+          try {
+            const dnsRes = await queryMikrotikSocket(connParams, ['/ip/dns/print']);
+            if (dnsRes.success && dnsRes.sentences) {
+              for (const sent of dnsRes.sentences) {
+                for (const w of sent) {
+                  if (w.startsWith('=servers=')) {
+                    const parts = w.substring(9).split(',').filter(Boolean);
+                    currentPrimaryDns = parts[0] || '';
+                    currentSecondaryDns = parts[1] || '';
+                  }
+                  if (w.startsWith('=allow-remote-requests=')) {
+                    allowRemoteRequests = w.substring(23) === 'yes' || w.substring(23) === 'true';
+                  }
+                }
+              }
+            }
+          } catch {}
+
+          // Query live NAT firewall redirect rules for port 53
+          let redirectUdpPort53Active = false;
+          let redirectTcpPort53Active = false;
+          try {
+            const natRes = await queryMikrotikSocket(connParams, ['/ip/firewall/nat/print']);
+            if (natRes.success && natRes.sentences) {
+              for (const sent of natRes.sentences) {
+                let action = '';
+                let protocol = '';
+                let dstPort = '';
+                let disabled = '';
+                for (const w of sent) {
+                  if (w.startsWith('=action=')) action = w.substring(8).toLowerCase();
+                  if (w.startsWith('=protocol=')) protocol = w.substring(10).toLowerCase();
+                  if (w.startsWith('=dst-port=')) dstPort = w.substring(10);
+                  if (w.startsWith('=disabled=')) disabled = w.substring(10).toLowerCase();
+                }
+                const isEnabled = disabled !== 'yes' && disabled !== 'true';
+                if (isEnabled && action === 'redirect' && dstPort.includes('53')) {
+                  if (protocol === 'udp') redirectUdpPort53Active = true;
+                  if (protocol === 'tcp') redirectTcpPort53Active = true;
+                }
+              }
+            }
+          } catch {}
+
+          // Query live Hotspot server and active users
+          let hotspotStatus: "Active" | "Disabled" | "Not Configured" = "Disabled";
+          let hotspotServer = "";
+          let hotspotInterface = "";
+          let addressPool = "";
+          let activeHotspotClients = 0;
+          try {
+            const hsRes = await queryMikrotikSocket(connParams, ['/ip/hotspot/print']);
+            if (hsRes.success && hsRes.sentences && hsRes.sentences.length > 0) {
+              hotspotStatus = "Active";
+              for (const sent of hsRes.sentences) {
+                for (const w of sent) {
+                  if (w.startsWith('=name=')) hotspotServer = w.substring(6);
+                  if (w.startsWith('=interface=')) hotspotInterface = w.substring(11);
+                  if (w.startsWith('=address-pool=')) addressPool = w.substring(14);
+                }
+              }
+            }
+            const hsActRes = await queryMikrotikSocket(connParams, ['/ip/hotspot/active/print']);
+            if (hsActRes.success && hsActRes.sentences) {
+              activeHotspotClients = hsActRes.sentences.filter(s => s.some(w => w.startsWith('=user='))).length;
+            }
+          } catch {}
 
           const liveInfo: RouterResourceInfo = {
             identity: `${boardName} (${cleanHost})`,
@@ -168,20 +241,21 @@ async function startServer() {
             isVersion6: version.includes('6.'),
             uptime,
             cpuLoad,
-            ramUsage: `${usedRamMB} MB / ${totalRamMB} MB`,
-            totalRam: `${totalRamMB} MB`,
-            freeRam: `${freeRamMB} MB`,
-            hotspotStatus: "Active",
-            hotspotServer: "hs-server1",
-            hotspotInterface: "bridge-hotspot",
-            addressPool: "hs-pool-1",
-            subnet: "192.168.88.0/24",
-            dhcpServer: "dhcp-hotspot",
-            currentPrimaryDns: "1.1.1.3",
-            currentSecondaryDns: "1.0.0.3",
-            allowRemoteRequests: true,
-            redirectUdpPort53Active: true,
-            redirectTcpPort53Active: true,
+            ramUsage: totalRamMB > 0 ? `${usedRamMB} MB / ${totalRamMB} MB` : 'N/A',
+            totalRam: totalRamMB > 0 ? `${totalRamMB} MB` : 'N/A',
+            freeRam: freeRamMB > 0 ? `${freeRamMB} MB` : 'N/A',
+            hotspotStatus,
+            hotspotServer,
+            hotspotInterface,
+            addressPool,
+            subnet: "",
+            dhcpServer: "",
+            currentPrimaryDns,
+            currentSecondaryDns,
+            allowRemoteRequests,
+            redirectUdpPort53Active,
+            redirectTcpPort53Active,
+            activeHotspotClients,
           };
 
           return res.json({ success: true, isRealHardware: true, info: liveInfo });
@@ -195,9 +269,9 @@ async function startServer() {
         const restResult = await queryMikrotikRest(connParams, 'system/resource');
         if (restResult.success && restResult.data) {
           const d = restResult.data;
-          const totalRamMB = Math.round((d['total-memory'] || 1073741824) / 1048576);
-          const freeRamMB = Math.round((d['free-memory'] || 536870912) / 1048576);
-          const usedRamMB = totalRamMB - freeRamMB;
+          const totalRamMB = d['total-memory'] ? Math.round(d['total-memory'] / 1048576) : 0;
+          const freeRamMB = d['free-memory'] ? Math.round(d['free-memory'] / 1048576) : 0;
+          const usedRamMB = totalRamMB > 0 ? Math.max(0, totalRamMB - freeRamMB) : 0;
           const boardName = d['board-name'] || 'MikroTik Router';
           const version = `RouterOS v${String(d.version || '7').replace(/^v/i, '')}`;
 
@@ -206,21 +280,21 @@ async function startServer() {
             version,
             isVersion6: version.includes('6.'),
             uptime: d.uptime || 'Online',
-            cpuLoad: `${d['cpu-load'] || 5}%`,
-            ramUsage: `${usedRamMB} MB / ${totalRamMB} MB`,
-            totalRam: `${totalRamMB} MB`,
-            freeRam: `${freeRamMB} MB`,
+            cpuLoad: d['cpu-load'] !== undefined ? `${d['cpu-load']}%` : 'N/A',
+            ramUsage: totalRamMB > 0 ? `${usedRamMB} MB / ${totalRamMB} MB` : 'N/A',
+            totalRam: totalRamMB > 0 ? `${totalRamMB} MB` : 'N/A',
+            freeRam: freeRamMB > 0 ? `${freeRamMB} MB` : 'N/A',
             hotspotStatus: "Active",
-            hotspotServer: "hs-server1",
-            hotspotInterface: "bridge-hotspot",
-            addressPool: "hs-pool-1",
-            subnet: "192.168.88.0/24",
-            dhcpServer: "dhcp-hotspot",
-            currentPrimaryDns: "1.1.1.3",
-            currentSecondaryDns: "1.0.0.3",
-            allowRemoteRequests: true,
-            redirectUdpPort53Active: true,
-            redirectTcpPort53Active: true,
+            hotspotServer: "",
+            hotspotInterface: "",
+            addressPool: "",
+            subnet: "",
+            dhcpServer: "",
+            currentPrimaryDns: "",
+            currentSecondaryDns: "",
+            allowRemoteRequests: false,
+            redirectUdpPort53Active: false,
+            redirectTcpPort53Active: false,
           };
 
           return res.json({ success: true, isRealHardware: true, info: liveInfo });
@@ -229,11 +303,15 @@ async function startServer() {
         console.warn("REST status probe warning:", restErr.message);
       }
 
-      // Fallback
-      const simInfo = getSimulatedRouterOS6Info(connParams);
-      res.json({ success: true, isFallback: true, info: simInfo });
+      // No silent fallback to mock data in production
+      return res.status(502).json({
+        success: false,
+        code: "MIKROTIK_OFFLINE",
+        error: `Could not connect to MikroTik Router at ${cleanHost}:${connParams.port}. Check IP address, API port, and credentials.`,
+      });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({ success: false, code: classified.code, error: classified.message });
     }
   });
 
@@ -245,7 +323,6 @@ async function startServer() {
     const username = rawBody.username || rawBody.user || rawBody.router?.username;
     const password = rawBody.password !== undefined ? rawBody.password : (rawBody.pass !== undefined ? rawBody.pass : (rawBody.router?.password || ''));
     const isDemo = rawBody.isDemo !== undefined ? rawBody.isDemo : (rawBody.router?.isDemo || false);
-    const forceConnect = Boolean(rawBody.forceConnect || rawBody.allowStaging);
 
     try {
       if (!host || !username) {
@@ -253,9 +330,9 @@ async function startServer() {
       }
 
       const cleanHost = sanitizeMikrotikHost(host);
-      const isExplicitDemo = forceConnect || (process.env.MIKROTIK_MOCK_MODE === "true") || (Boolean(isDemo) || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
+      const isExplicitDemo = isMockModeAllowed() && (Boolean(isDemo) || cleanHost === 'demo.mikrotik.local');
 
-      // Check if this is explicitly requested as demo/simulated router or staging forced
+      // Check if this is explicitly configured as demo/simulated router with mock mode enabled
       if (isExplicitDemo) {
         const info = getSimulatedRouterOS6Info({ host: cleanHost, port: Number(port), username, password, isDemo: true });
         const routerData = {
@@ -1729,6 +1806,57 @@ async function startServer() {
         return res.status(502).json(rebootResult);
       }
       res.json(rebootResult);
+    } catch (err: any) {
+      const classified = classifyMikrotikError(err.message);
+      res.status(500).json({
+        success: false,
+        code: classified.code,
+        error: classified.message,
+      });
+    }
+  });
+
+  // 13b. Real RouterOS Ping Utility
+  app.post("/api/mikrotik/ping", async (req, res) => {
+    const { router, target, count, host, apiPort, username, password } = req.body;
+    try {
+      const targetHost = router?.ip || host || "";
+      const cleanHost = sanitizeMikrotikHost(targetHost);
+      if (!cleanHost) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_CONFIGURATION",
+          error: "MikroTik router IP or host is required for ping operation",
+        });
+      }
+
+      if (!target || typeof target !== "string") {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_TARGET",
+          error: "Target address or host is required for ping operation",
+        });
+      }
+
+      const params: MikrotikConnParams = {
+        host: cleanHost,
+        port: Number(router?.apiPort || apiPort) || 8728,
+        username: String(router?.username || username || "admin").trim(),
+        password: router?.password
+          ? String(router.password).trim()
+          : password
+            ? String(password).trim()
+            : "",
+        timeoutMs: 15000,
+        useSsl: Number(router?.apiPort || apiPort) === 8729,
+        isDemo: Boolean(router?.isDemo),
+      };
+
+      const pingResult = await executeMikrotikPing(params, target, Number(count) || 5);
+      if (!pingResult.success && pingResult.error) {
+        return res.status(502).json(pingResult);
+      }
+      res.json(pingResult);
     } catch (err: any) {
       const classified = classifyMikrotikError(err.message);
       res.status(500).json({

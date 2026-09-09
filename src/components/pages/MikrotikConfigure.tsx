@@ -57,11 +57,11 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  if (data.info || data.router) {
  const infoObj = data.info || data.router;
  setLiveInfo({
- osVersion: infoObj.version || 'RouterOS v7.x',
- uptime: infoObj.uptime || '1 day',
- cpu: infoObj.cpuLoad ? `${infoObj.cpuLoad}%` : '8%',
- ram: infoObj.ramUsage || '128 MB / 512 MB',
- activeUsers: data.activeUsersCount || 15,
+ osVersion: infoObj.version || 'RouterOS',
+ uptime: infoObj.uptime || 'N/A',
+ cpu: infoObj.cpuLoad ? (String(infoObj.cpuLoad).includes('%') ? infoObj.cpuLoad : `${infoObj.cpuLoad}%`) : (infoObj.cpu || 'N/A'),
+ ram: infoObj.ramUsage || infoObj.ram || 'N/A',
+ activeUsers: data.activeUsersCount ?? 0,
  });
  }
  showToast(

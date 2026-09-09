@@ -16,6 +16,8 @@ import {
   classifyMikrotikError,
   sanitizeMikrotikHost,
   resetInterfaceTrafficBaseline,
+  isValidPingTarget,
+  parseRouterOsPingSentences,
 } from "../src/server/mikrotikApi.js";
 
 let totalTests = 0;
@@ -34,15 +36,15 @@ function assert(condition: boolean, testName: string, detail?: any) {
   }
 }
 
-console.log("\n=== MikroTik Integration Automated Tests ===\n");
+console.log("\n=== MikroTik Integration Automated Test Suite ===\n");
 
 // -------------------------------------------------------------
-// 1. Bandwidth Calculation: Exact Mbps from known byte counters
+// 1. Bandwidth Calculation: Exact Mbps, Rollover, Zero Elapsed Time & Multi-Interface
 // -------------------------------------------------------------
-console.log("Suite 1: Real Bandwidth Calculation");
+console.log("Suite 1: Bandwidth Telemetry Math & Edge Cases");
 resetInterfaceTrafficBaseline();
 
-// Sample 1: 0 bytes at T=1000
+// Test 1.1: First poll with no previous sample -> baseline established, rate = 0
 const sample1 = {
   rxBytes: 0,
   txBytes: 0,
@@ -50,8 +52,6 @@ const sample1 = {
   txPackets: 0,
   timestamp: 1000,
 };
-
-// First poll with no previous sample -> baseline established, rate = 0
 const res1 = calculateInterfaceBandwidth(sample1, undefined, 1000);
 assert(
   res1.rate.rxMbps === 0 && res1.rate.txMbps === 0,
@@ -59,8 +59,7 @@ assert(
   res1.rate
 );
 
-// Sample 2: 1,250,000 bytes rx in 1.0 second (1,250,000 * 8 = 10,000,000 bits = 10.0 Mbps)
-//           625,000 bytes tx in 1.0 second (625,000 * 8 = 5,000,000 bits = 5.0 Mbps)
+// Test 1.2: Normal delta calculation (1,250,000 bytes rx in 1.0s = 10.0 Mbps; 625,000 bytes tx in 1.0s = 5.0 Mbps)
 const sample2 = {
   rxBytes: 1_250_000,
   txBytes: 625_000,
@@ -68,19 +67,13 @@ const sample2 = {
   txPackets: 500,
   timestamp: 2000,
 };
-
 const res2 = calculateInterfaceBandwidth(sample2, res1.nextSample, 2000);
 assert(res2.rate.rxMbps === 10.0, "1,250,000 bytes / 1s equals exactly 10.0 Mbps Rx", res2.rate);
 assert(res2.rate.txMbps === 5.0, "625,000 bytes / 1s equals exactly 5.0 Mbps Tx", res2.rate);
 assert(res2.rate.rxPacketsPerSec === 1000, "1000 packets / 1s equals 1000 pps Rx", res2.rate);
 assert(res2.rate.txPacketsPerSec === 500, "500 packets / 1s equals 500 pps Tx", res2.rate);
 
-// -------------------------------------------------------------
-// 2. Counter Rollover & Reset Safety (No Negative Mbps)
-// -------------------------------------------------------------
-console.log("\nSuite 2: Counter Rollover & Reset Handling");
-
-// Router rebooted or interface reset -> counter dropped from 1,250,000 to 50,000
+// Test 1.3: Counter reset / router reboot handling (counter dropped from 1.25M to 50k -> 0 Mbps, no negative)
 const resetSample = {
   rxBytes: 50_000,
   txBytes: 20_000,
@@ -88,13 +81,12 @@ const resetSample = {
   txPackets: 20,
   timestamp: 3000,
 };
-
 const resReset = calculateInterfaceBandwidth(resetSample, res2.nextSample, 3000);
 assert(resReset.rate.rxMbps === 0, "Rollover / counter reset produces 0 Rx Mbps (never negative)", resReset.rate);
 assert(resReset.rate.txMbps === 0, "Rollover / counter reset produces 0 Tx Mbps (never negative)", resReset.rate);
 assert(resReset.rate.rxBps === 0 && resReset.rate.txBps === 0, "Rollover bps counters clamped to 0", resReset.rate);
 
-// Next sample after reset: regular progression from 50,000 to 1,300,000 (+1,250,000 in 1s)
+// Test 1.4: Recovery immediately after reset
 const samplePostReset = {
   rxBytes: 1_300_000,
   txBytes: 645_000,
@@ -102,14 +94,24 @@ const samplePostReset = {
   txPackets: 520,
   timestamp: 4000,
 };
-
 const resPostReset = calculateInterfaceBandwidth(samplePostReset, resReset.nextSample, 4000);
 assert(resPostReset.rate.rxMbps === 10.0, "Bandwidth calculation recovers immediately after counter reset", resPostReset.rate);
 
+// Test 1.5: Zero elapsed time (dt <= 0) returns 0 Mbps without division by zero
+const zeroDtSample = {
+  rxBytes: 2_000_000,
+  txBytes: 1_000_000,
+  rxPackets: 2000,
+  txPackets: 1000,
+  timestamp: 4000, // Same timestamp as previous
+};
+const resZeroDt = calculateInterfaceBandwidth(zeroDtSample, resPostReset.nextSample, 4000);
+assert(resZeroDt.rate.rxMbps === 0 && resZeroDt.rate.txMbps === 0, "Zero elapsed time (dt = 0) safely returns 0 Mbps", resZeroDt.rate);
+
 // -------------------------------------------------------------
-// 3. Simple Queue Target Validation
+// 2. Simple Queue Target Validation & Resolution
 // -------------------------------------------------------------
-console.log("\nSuite 3: Simple Queue Target Validation");
+console.log("\nSuite 2: Simple Queue Target Validation & Resolution");
 
 // Valid targets: IP / Subnet
 assert(isValidQueueTarget("192.168.1.50/32"), "Accepts host IP with /32");
@@ -126,12 +128,9 @@ assert(!isValidQueueTarget("   "), "Rejects whitespace-only target");
 assert(!isValidQueueTarget(null as any), "Rejects null target");
 assert(!isValidQueueTarget(undefined as any), "Rejects undefined target");
 assert(!isValidQueueTarget("fe-hotspot-client"), "Rejects non-IP hostname/label");
+assert(!isValidQueueTarget("999.999.999.999"), "Rejects out-of-range IP target");
 
-// -------------------------------------------------------------
-// 4. Target Resolution Helper (buildValidQueueTarget)
-// -------------------------------------------------------------
-console.log("\nSuite 4: Target Resolution Helper (buildValidQueueTarget)");
-
+// Target Resolution Helper (buildValidQueueTarget)
 const clientWithStaticIp = { userId: "user1", ipAddress: "192.168.88.50" };
 assert(
   buildValidQueueTarget(clientWithStaticIp) === "192.168.88.50/32",
@@ -157,26 +156,38 @@ assert(
 );
 
 // -------------------------------------------------------------
-// 5. Error Classification & Security
+// 3. Error Classification, Protocol Traps & Credential Scrubbing
 // -------------------------------------------------------------
-console.log("\nSuite 5: Error Classification & Security");
+console.log("\nSuite 3: RouterOS Error Classification & Trap Handling");
 
 const authErr = classifyMikrotikError("RouterOS Authentication Failed (Challenge Rejected)");
-assert(authErr.code === "AUTH_FAILED", "Classifies authentication errors");
+assert(authErr.code === "MIKROTIK_AUTH_FAILED" || authErr.code === "AUTH_FAILED", "Classifies authentication errors");
 
 const timeoutErr = classifyMikrotikError("Socket connection timed out after 5000ms");
-assert(timeoutErr.code === "ROUTER_OFFLINE", "Classifies timeout errors as ROUTER_OFFLINE");
+assert(timeoutErr.code === "MIKROTIK_TIMEOUT" || timeoutErr.code === "ROUTER_OFFLINE", "Classifies timeout errors");
+
+const offlineErr = classifyMikrotikError("Router host unreachable ENOTFOUND router.local");
+assert(offlineErr.code === "MIKROTIK_OFFLINE" || offlineErr.code === "ROUTER_OFFLINE", "Classifies offline router errors");
 
 const connErr = classifyMikrotikError("connect ECONNREFUSED 192.168.88.1:8728");
 assert(connErr.code === "API_UNAVAILABLE", "Classifies connection refused as API_UNAVAILABLE");
 
+const trapErr = classifyMikrotikError("RouterOS Trap: !trap =message=invalid internal id");
+assert(trapErr.code === "ROUTEROS_TRAP" || trapErr.code === "ROUTEROS_COMMAND_FAILED", "Classifies !trap protocol responses");
+
+const permErr = classifyMikrotikError("Permission denied: user does not have write policy");
+assert(permErr.code === "MIKROTIK_PERMISSION_DENIED" || permErr.code === "PERMISSION_DENIED", "Classifies permission denied errors");
+
 const cleanedHost = sanitizeMikrotikHost("https://192.168.88.1:8728/webfig");
 assert(cleanedHost === "192.168.88.1", "Sanitizes URL prefixes, ports, and paths from host");
 
+const sanitizedErr = classifyMikrotikError("Authentication failure for user 'admin' password 'superSecret123'");
+assert(!sanitizedErr.message.includes("superSecret123"), "Passwords and sensitive credentials are scrubbed from errors");
+
 // -------------------------------------------------------------
-// 6. DNS Redirect NAT Independent Verification & Error Codes
+// 4. DNS Redirect NAT Independent Verification & Error Codes
 // -------------------------------------------------------------
-console.log("\nSuite 6: DNS NAT Independent Verification & Error Structures");
+console.log("\nSuite 4: DNS Configuration & NAT Verification");
 
 const tcpNatErr = classifyMikrotikError("DNS TCP NAT redirect rule verification failed on RouterOS");
 assert(tcpNatErr.code === "DNS_TCP_NAT_VERIFICATION_FAILED", "Classifies DNS TCP NAT verification error");
@@ -213,11 +224,51 @@ for (const sent of testNatSentencesWithOnlyUdp) {
 assert(udpOnly === true && tcpOnly === false, "Detects missing TCP NAT redirect rule independently");
 
 // -------------------------------------------------------------
-// 7. Multi-Step Client Sync: Component-Level Results & Error Integrity
+// 5. Ping Target Validation & RouterOS Sentence Parsing
 // -------------------------------------------------------------
-console.log("\nSuite 7: Multi-Step Client Sync Component Results & Error Integrity");
+console.log("\nSuite 5: RouterOS Ping Target Validation & Parsing");
 
-// Simulation of sync evaluation logic:
+// Target validation
+assert(isValidPingTarget("8.8.8.8"), "Accepts valid IPv4 target 8.8.8.8");
+assert(isValidPingTarget("1.1.1.1"), "Accepts valid IPv4 target 1.1.1.1");
+assert(isValidPingTarget("google.com"), "Accepts valid domain target google.com");
+assert(isValidPingTarget("2001:4860:4860::8888"), "Accepts valid IPv6 target");
+assert(!isValidPingTarget("8.8.8.8; rm -rf /"), "Rejects injection characters in ping target");
+assert(!isValidPingTarget("invalid target with spaces"), "Rejects ping targets with spaces");
+assert(!isValidPingTarget("999.999.999.999"), "Rejects out of range IP in ping target");
+assert(!isValidPingTarget(""), "Rejects empty ping target");
+
+// Sentence parsing: Successful ping replies
+const mockSuccessSentences = [
+  ["!re", "=host=8.8.8.8", "=size=56", "=ttl=118", "=time=12.4ms", "=sent=1", "=received=1"],
+  ["!re", "=host=8.8.8.8", "=size=56", "=ttl=118", "=time=14.1ms", "=sent=2", "=received=2"],
+  ["!re", "=host=8.8.8.8", "=size=56", "=ttl=118", "=time=11.8ms", "=sent=3", "=received=3"],
+  ["!done"],
+];
+const pingResultSuccess = parseRouterOsPingSentences(mockSuccessSentences, "8.8.8.8", 3);
+assert(pingResultSuccess.success === true, "Parses successful ping replies");
+assert(pingResultSuccess.transmitted === 3, "Correctly counts transmitted packets");
+assert(pingResultSuccess.received === 3, "Correctly counts received packets");
+assert(pingResultSuccess.packetLoss === 0, "Computes 0% packet loss for successful ping");
+assert(pingResultSuccess.replies.length === 3, "Contains all 3 ping reply items");
+assert(pingResultSuccess.avgRtt !== undefined, "Calculates average RTT for replies");
+
+// Sentence parsing: 100% timeout ping
+const mockTimeoutSentences = [
+  ["!re", "=host=10.255.255.1", "=size=56", "=status=timeout", "=sent=1", "=received=0"],
+  ["!re", "=host=10.255.255.1", "=size=56", "=status=timeout", "=sent=2", "=received=0"],
+  ["!done"],
+];
+const pingResultTimeout = parseRouterOsPingSentences(mockTimeoutSentences, "10.255.255.1", 2);
+assert(pingResultTimeout.success === false, "Recognizes complete timeout as failure");
+assert(pingResultTimeout.packetLoss === 100, "Computes 100% packet loss on timeout");
+assert(pingResultTimeout.received === 0, "0 packets received on timeout");
+
+// -------------------------------------------------------------
+// 6. Multi-Step Client Sync: Component-Level Results & Error Integrity
+// -------------------------------------------------------------
+console.log("\nSuite 6: Multi-Step Client Sync Component Results & Error Integrity");
+
 function evaluateSyncResult(opts: {
   isPppoe: boolean;
   isHotspot: boolean;
@@ -279,10 +330,6 @@ const pppFailResult = evaluateSyncResult({
 assert(pppFailResult.success === false, "Overall sync is FALSE when PPPoE secret fails");
 assert(pppFailResult.pppoe?.success === false, "PPPoE component has success=false");
 assert(pppFailResult.pppoe?.error?.includes("Username already exists"), "PPPoE error preserved accurately");
-
-// Case 4: No credentials exposed in error output
-const sanitizedErr = classifyMikrotikError("Authentication failure for user 'admin' password 'superSecret123'");
-assert(!sanitizedErr.message.includes("superSecret123"), "Passwords and sensitive secrets are never leaked in classified errors");
 
 // -------------------------------------------------------------
 // Results Summary

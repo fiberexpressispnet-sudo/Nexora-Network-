@@ -907,30 +907,60 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
     setDeleteClientData(null);
   };
 
-  // Ping Tool Execution
-  const handleRunPing = () => {
+  // Real RouterOS Ping Tool Execution
+  const handleRunPing = async () => {
+    if (!currentRouter || !currentRouter.ip) {
+      showToast("No router selected for ping", "error");
+      return;
+    }
+    const cleanTarget = pingHost.trim();
+    if (!cleanTarget) {
+      showToast("Please enter an IP address or hostname to ping", "warning");
+      return;
+    }
+
     setIsPinging(true);
     setPingLogs([
-      `PING ${pingHost} from MikroTik ${currentRouter.ip} (56 data bytes)...`,
+      `Initiating RouterOS /ping to ${cleanTarget} from MikroTik (${currentRouter.ip})...`,
     ]);
-    let count = 0;
-    const interval = setInterval(() => {
-      count++;
-      const ms = Math.floor(2 + Math.random() * 15);
-      setPingLogs((prev) => [
-        ...prev,
-        `64 bytes from ${pingHost}: icmp_seq=${count} ttl=118 time=${ms}ms`,
-      ]);
-      if (count >= 5) {
-        clearInterval(interval);
-        setIsPinging(false);
-        setPingLogs((prev) => [
-          ...prev,
-          `--- ${pingHost} ping statistics ---`,
-          `5 packets transmitted, 5 received, 0% packet loss, avg time 6.4ms`,
+
+    try {
+      const res = await fetch("/api/mikrotik/ping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          router: currentRouter,
+          host: currentRouter.ip,
+          apiPort: currentRouter.apiPort || 8728,
+          username: currentRouter.username,
+          password: currentRouter.password,
+          target: cleanTarget,
+          count: 5,
+        }),
+      });
+      const data = await res.json();
+      if (data.logs && Array.isArray(data.logs)) {
+        setPingLogs(data.logs);
+      } else if (data.error) {
+        setPingLogs([
+          `PING ${cleanTarget} from MikroTik (${currentRouter.ip})...`,
+          `[ERROR] RouterOS Ping failed: ${data.error}`,
         ]);
       }
-    }, 500);
+      if (data.success) {
+        showToast(`✅ Ping to ${cleanTarget} succeeded (${data.packetLoss ?? 0}% packet loss)`, "success");
+      } else {
+        showToast(data.error || "Ping to host failed or timed out", "error");
+      }
+    } catch (err: any) {
+      setPingLogs([
+        `PING ${cleanTarget} from MikroTik (${currentRouter.ip})...`,
+        `[NETWORK ERROR] Could not reach billing server: ${err.message}`,
+      ]);
+      showToast(`Ping network error: ${err.message}`, "error");
+    } finally {
+      setIsPinging(false);
+    }
   };
 
   return (

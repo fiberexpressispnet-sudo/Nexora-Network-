@@ -33,6 +33,7 @@ export interface RouterResourceInfo {
   allowRemoteRequests: boolean;
   redirectUdpPort53Active: boolean;
   redirectTcpPort53Active: boolean;
+  activeHotspotClients?: number;
 }
 
 export interface DiagnosticCheckItem {
@@ -72,16 +73,27 @@ export interface DiagnosticResult {
 
 export type MikrotikErrorCode =
   | "ROUTER_OFFLINE"
+  | "MIKROTIK_OFFLINE"
+  | "MIKROTIK_TIMEOUT"
   | "AUTH_FAILED"
+  | "MIKROTIK_AUTH_FAILED"
   | "TIMEOUT"
   | "API_UNAVAILABLE"
   | "COMMAND_FAILED"
+  | "ROUTEROS_COMMAND_FAILED"
+  | "ROUTEROS_TRAP"
+  | "ROUTEROS_FATAL"
   | "PERMISSION_DENIED"
+  | "MIKROTIK_PERMISSION_DENIED"
   | "INVALID_TARGET"
+  | "INVALID_IP"
   | "UNSUPPORTED_OPERATION"
   | "INVALID_CONFIGURATION"
+  | "DNS_UPDATE_FAILED"
   | "DNS_TCP_NAT_VERIFICATION_FAILED"
-  | "DNS_UDP_NAT_VERIFICATION_FAILED";
+  | "DNS_UDP_NAT_VERIFICATION_FAILED"
+  | "PING_FAILED"
+  | "REBOOT_FAILED";
 
 export interface MikrotikError {
   code: MikrotikErrorCode;
@@ -349,6 +361,36 @@ export function classifyMikrotikError(
       message: errMessage || "DNS UDP NAT redirect rule verification failed on RouterOS.",
     };
   }
+  if (lower.includes("dns update") || lower.includes("failed to update dns")) {
+    return {
+      code: "DNS_UPDATE_FAILED",
+      message: errMessage || "Failed to update DNS servers on RouterOS.",
+    };
+  }
+  if (lower.includes("ping") && (lower.includes("fail") || lower.includes("unreach") || lower.includes("timeout"))) {
+    return {
+      code: "PING_FAILED",
+      message: errMessage || "Ping operation failed on RouterOS.",
+    };
+  }
+  if (lower.includes("reboot") && (lower.includes("fail") || lower.includes("error"))) {
+    return {
+      code: "REBOOT_FAILED",
+      message: errMessage || "Reboot operation failed on RouterOS.",
+    };
+  }
+  if (lower.includes("!fatal") || lower.includes("fatal protocol error") || lower.includes("fatal error")) {
+    return {
+      code: "ROUTEROS_FATAL",
+      message: errMessage || "RouterOS fatal protocol error encountered.",
+    };
+  }
+  if (lower.includes("!trap") || lower.includes("trap error") || lower.includes("trap:")) {
+    return {
+      code: "ROUTEROS_TRAP",
+      message: errMessage || "RouterOS execution trap returned by router.",
+    };
+  }
   if (
     socketErrCode === "ECONNREFUSED" ||
     lower.includes("econnrefused") ||
@@ -362,13 +404,23 @@ export function classifyMikrotikError(
   }
   if (
     socketErrCode === "ETIMEDOUT" ||
-    socketErrCode === "ENOTFOUND" ||
-    lower.includes("timeout") ||
     lower.includes("timed out") ||
-    lower.includes("not found")
+    lower.includes("timeout")
   ) {
     return {
-      code: "ROUTER_OFFLINE",
+      code: "MIKROTIK_TIMEOUT",
+      message: `MikroTik router connection timed out: ${errMessage}`,
+    };
+  }
+  if (
+    socketErrCode === "ENOTFOUND" ||
+    lower.includes("not found") ||
+    lower.includes("unreachable") ||
+    lower.includes("offline") ||
+    lower.includes("ehostunreach")
+  ) {
+    return {
+      code: "MIKROTIK_OFFLINE",
       message: `MikroTik router is unreachable or offline: ${errMessage}`,
     };
   }
@@ -380,7 +432,7 @@ export function classifyMikrotikError(
     lower.includes("challenge rejected")
   ) {
     return {
-      code: "AUTH_FAILED",
+      code: "MIKROTIK_AUTH_FAILED",
       message:
         "RouterOS API authentication failed. Verify API username and password.",
     };
@@ -391,7 +443,7 @@ export function classifyMikrotikError(
     lower.includes("access denied")
   ) {
     return {
-      code: "PERMISSION_DENIED",
+      code: "MIKROTIK_PERMISSION_DENIED",
       message:
         "RouterOS user does not have sufficient group permissions (requires api, read, write, test, reboot).",
     };
@@ -400,6 +452,12 @@ export function classifyMikrotikError(
     return {
       code: "INVALID_TARGET",
       message: "Invalid target IP/subnet specified for Simple Queue.",
+    };
+  }
+  if (lower.includes("invalid ip") || lower.includes("bad address")) {
+    return {
+      code: "INVALID_IP",
+      message: "Invalid IP address provided.",
     };
   }
   if (
@@ -414,9 +472,26 @@ export function classifyMikrotikError(
     };
   }
   return {
-    code: "COMMAND_FAILED",
+    code: "ROUTEROS_COMMAND_FAILED",
     message: errMessage || "RouterOS command execution failed.",
   };
+}
+
+/**
+ * Executes a RouterOS command and throws a structured error if the router rejects it
+ */
+export async function executeRouterOsCommandOrThrow(
+  params: MikrotikConnParams,
+  commandWords: string[],
+): Promise<string[][]> {
+  const res = await queryMikrotikSocket(params, commandWords);
+  if (!res.success) {
+    const classified = classifyMikrotikError(res.error || "RouterOS Command Failed");
+    const err: any = new Error(classified.message);
+    err.code = classified.code;
+    throw err;
+  }
+  return res.sentences;
 }
 
 /**
@@ -1223,6 +1298,272 @@ export async function executeMikrotikReboot(params: MikrotikConnParams): Promise
       error: classified.message,
     };
   }
+}
+
+export interface MikrotikPingReply {
+  seq: number;
+  host: string;
+  size?: number;
+  ttl?: number;
+  time?: string;
+  status?: string;
+}
+
+export interface MikrotikPingResult {
+  success: boolean;
+  target: string;
+  transmitted: number;
+  received: number;
+  lost: number;
+  packetLoss: number;
+  minRtt?: string;
+  avgRtt?: string;
+  maxRtt?: string;
+  replies: MikrotikPingReply[];
+  logs: string[];
+  code?: MikrotikErrorCode;
+  error?: string;
+}
+
+export function isValidPingTarget(target: string): boolean {
+  if (!target || typeof target !== "string") return false;
+  const clean = target.trim();
+  if (clean.length < 1 || clean.length > 253) return false;
+  if (/[\s;`'"$<>|&\\\/]/.test(clean)) return false;
+  // IPv4 check
+  const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+  if (ipv4Regex.test(clean)) {
+    const parts = clean.split(".").map(Number);
+    return parts.every((p) => p >= 0 && p <= 255);
+  }
+  // IPv6 check
+  if (/^[0-9a-fA-F:]+$/.test(clean) && clean.includes(":")) {
+    return true;
+  }
+  // Hostname / FQDN check
+  const hostnameRegex = /^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$|^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
+  return hostnameRegex.test(clean);
+}
+
+export function parseRouterOsPingSentences(
+  sentences: string[][],
+  target: string,
+  expectedCount: number,
+): MikrotikPingResult {
+  const replies: MikrotikPingReply[] = [];
+  const logs: string[] = [`PING ${target} (56 data bytes)...`];
+  let seqCounter = 1;
+  let transmitted = 0;
+  let received = 0;
+  let minRtt: string | undefined;
+  let avgRtt: string | undefined;
+  let maxRtt: string | undefined;
+  const timesMs: number[] = [];
+
+  for (const sentence of sentences) {
+    if (sentence[0] !== "!re") continue;
+    let host = target;
+    let size = 56;
+    let ttl: number | undefined = undefined;
+    let timeStr: string | undefined = undefined;
+    let status: string | undefined = undefined;
+    let sentFromWord: number | undefined = undefined;
+    let receivedFromWord: number | undefined = undefined;
+
+    for (const w of sentence) {
+      if (w.startsWith("=host=")) host = w.substring(6);
+      if (w.startsWith("=size=")) size = parseInt(w.substring(6), 10) || 56;
+      if (w.startsWith("=ttl=")) ttl = parseInt(w.substring(5), 10);
+      if (w.startsWith("=time=")) timeStr = w.substring(6);
+      if (w.startsWith("=status=")) status = w.substring(8);
+      if (w.startsWith("=sent=")) sentFromWord = parseInt(w.substring(6), 10);
+      if (w.startsWith("=received=")) receivedFromWord = parseInt(w.substring(10), 10);
+      if (w.startsWith("=min-rtt=")) minRtt = w.substring(9);
+      if (w.startsWith("=avg-rtt=")) avgRtt = w.substring(9);
+      if (w.startsWith("=max-rtt=")) maxRtt = w.substring(9);
+    }
+
+    if (sentFromWord !== undefined) transmitted = Math.max(transmitted, sentFromWord);
+    if (receivedFromWord !== undefined) received = Math.max(received, receivedFromWord);
+
+    if (timeStr || status || ttl !== undefined) {
+      const currentSeq = seqCounter++;
+      if (status && status.toLowerCase().includes("timeout")) {
+        replies.push({
+          seq: currentSeq,
+          host,
+          size,
+          status: "timeout",
+        });
+        logs.push(`Request timeout for icmp_seq=${currentSeq}`);
+      } else if (status && (status.toLowerCase().includes("unreach") || status.toLowerCase().includes("fail"))) {
+        replies.push({
+          seq: currentSeq,
+          host,
+          size,
+          status,
+        });
+        logs.push(`From ${host} icmp_seq=${currentSeq} Destination Host Unreachable`);
+      } else {
+        replies.push({
+          seq: currentSeq,
+          host,
+          size,
+          ttl: ttl ?? 64,
+          time: timeStr || "0ms",
+          status: "ok",
+        });
+        logs.push(
+          `${size + 8} bytes from ${host}: icmp_seq=${currentSeq} ttl=${ttl ?? 64} time=${timeStr || "0ms"}`
+        );
+        if (timeStr) {
+          const match = timeStr.match(/^([\d.]+)/);
+          if (match) {
+            let ms = parseFloat(match[1]);
+            if (timeStr.includes("us")) ms = ms / 1000;
+            else if (timeStr.includes("s") && !timeStr.includes("ms")) ms = ms * 1000;
+            timesMs.push(ms);
+          }
+        }
+      }
+    }
+  }
+
+  if (transmitted === 0) {
+    transmitted = Math.max(replies.length, expectedCount);
+  }
+  if (received === 0 && timesMs.length > 0) {
+    received = timesMs.length;
+  }
+  const lost = Math.max(0, transmitted - received);
+  const packetLoss = transmitted > 0 ? Math.round((lost / transmitted) * 100) : 100;
+
+  if (timesMs.length > 0) {
+    if (!minRtt) minRtt = `${Math.min(...timesMs).toFixed(1)}ms`;
+    if (!maxRtt) maxRtt = `${Math.max(...timesMs).toFixed(1)}ms`;
+    if (!avgRtt) {
+      const sum = timesMs.reduce((a, b) => a + b, 0);
+      avgRtt = `${(sum / timesMs.length).toFixed(1)}ms`;
+    }
+  }
+
+  logs.push(`--- ${target} ping statistics ---`);
+  let statsLine = `${transmitted} packets transmitted, ${received} received, ${packetLoss}% packet loss`;
+  if (avgRtt) statsLine += `, avg time ${avgRtt}`;
+  logs.push(statsLine);
+  if (minRtt && avgRtt && maxRtt) {
+    logs.push(`rtt min/avg/max = ${minRtt}/${avgRtt}/${maxRtt}`);
+  }
+
+  return {
+    success: received > 0,
+    target,
+    transmitted,
+    received,
+    lost,
+    packetLoss,
+    minRtt,
+    avgRtt,
+    maxRtt,
+    replies,
+    logs,
+  };
+}
+
+export async function executeMikrotikPing(
+  params: MikrotikConnParams,
+  target: string,
+  count = 5,
+): Promise<MikrotikPingResult> {
+  if (!params.host) {
+    return {
+      success: false,
+      target,
+      transmitted: 0,
+      received: 0,
+      lost: 0,
+      packetLoss: 100,
+      replies: [],
+      logs: ["Error: Router host is required."],
+      code: "INVALID_CONFIGURATION",
+      error: "Router host is required",
+    };
+  }
+
+  if (!isValidPingTarget(target)) {
+    return {
+      success: false,
+      target,
+      transmitted: 0,
+      received: 0,
+      lost: 0,
+      packetLoss: 100,
+      replies: [],
+      logs: [`Error: Invalid ping target "${target}". Must be a valid IPv4/IPv6 address or domain.`],
+      code: "INVALID_TARGET",
+      error: `Invalid ping target "${target}". Must be a valid IPv4/IPv6 address or domain.`,
+    };
+  }
+
+  const validCount = Math.min(Math.max(1, Math.floor(count)), 10);
+  const cleanTarget = target.trim();
+  const cleanHost = sanitizeMikrotikHost(params.host);
+
+  if (isMockModeAllowed() && (params.isDemo || cleanHost === "demo.mikrotik.local")) {
+    const mockSentences: string[][] = [];
+    for (let i = 1; i <= validCount; i++) {
+      mockSentences.push([
+        "!re",
+        `=host=${cleanTarget}`,
+        `=size=56`,
+        `=ttl=58`,
+        `=time=${(5 + i).toFixed(1)}ms`,
+        `=sent=${i}`,
+        `=received=${i}`,
+        `=packet-loss=0`,
+        `=min-rtt=6.0ms`,
+        `=avg-rtt=8.5ms`,
+        `=max-rtt=11.0ms`,
+      ]);
+    }
+    mockSentences.push(["!done"]);
+    return parseRouterOsPingSentences(mockSentences, cleanTarget, validCount);
+  }
+
+  const pingTimeout = (validCount + 5) * 1000;
+  const pingParams: MikrotikConnParams = {
+    ...params,
+    timeoutMs: pingTimeout,
+  };
+
+  const commandWords = [
+    "/ping",
+    `=address=${cleanTarget}`,
+    `=count=${validCount}`,
+  ];
+
+  const res = await queryMikrotikSocket(pingParams, commandWords);
+
+  if (!res.success) {
+    const classified = classifyMikrotikError(res.error || "");
+    return {
+      success: false,
+      target: cleanTarget,
+      transmitted: validCount,
+      received: 0,
+      lost: validCount,
+      packetLoss: 100,
+      replies: [],
+      logs: [
+        `PING ${cleanTarget} from MikroTik (${cleanHost})...`,
+        `[ROUTER ERROR] ${classified.message}`,
+      ],
+      code: classified.code,
+      error: classified.message,
+    };
+  }
+
+  return parseRouterOsPingSentences(res.sentences, cleanTarget, validCount);
 }
 
 /**

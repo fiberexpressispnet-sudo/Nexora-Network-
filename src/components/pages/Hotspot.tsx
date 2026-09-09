@@ -144,19 +144,11 @@ export const HotspotPage: React.FC<HotspotProps> = ({
       return;
     }
 
-    const randomMac = Array.from({ length: 6 }, () =>
-      Math.floor(Math.random() * 256)
-        .toString(16)
-        .padStart(2, "0"),
-    )
-      .join(":")
-      .toUpperCase();
-
     const newUser: HotspotUser = {
       username: username.trim(),
       profile: profile,
       ip: ip.trim(),
-      mac: randomMac,
+      mac: "",
       uptime: "0m",
       bytesIn: "0 MB",
       bytesOut: "0 MB",
@@ -964,10 +956,8 @@ export const HotspotPage: React.FC<HotspotProps> = ({
                   const newHotspotUser: HotspotUser = {
                     username: reqModalUser,
                     profile: approveModalReq.package,
-                    ip:
-                      approveModalReq.ipAddress ||
-                      "10.5.5." + Math.floor(10 + Math.random() * 200),
-                    mac: approveModalReq.macAddress || "Auto-Detected",
+                    ip: approveModalReq.ipAddress || "Dynamic",
+                    mac: approveModalReq.macAddress || "",
                     uptime: "0m",
                     bytesIn: "0 B",
                     bytesOut: "0 B",

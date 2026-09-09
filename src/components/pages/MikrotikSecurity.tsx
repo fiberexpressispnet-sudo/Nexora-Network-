@@ -56,7 +56,7 @@ export const MikrotikSecurityPage: React.FC<MikrotikSecurityProps> = ({
  subnet: info.subnet,
  dhcpServer: info.dhcpServer,
  routerIp: routerConfig.ip,
- activeClientsCount: 142 // Mocked metric
+ activeClientsCount: info.activeHotspotClients ?? info.activeUsersCount ?? 0
  }
  });
  }
