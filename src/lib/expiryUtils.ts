@@ -255,11 +255,23 @@ export function findPackageByDetails(
   const cleanName = (packageName || "").trim().toLowerCase();
   const numPrice = priceStr !== undefined ? parseFloat(String(priceStr).replace(/[^\d.]/g, "")) : NaN;
 
+  // 1. Try to match BOTH name AND price first! (Most specific match, prevents duplicate name bugs)
+  if (cleanName && !isNaN(numPrice)) {
+    const matchBoth = pkgList.find(
+      (p) =>
+        p.name?.trim().toLowerCase() === cleanName &&
+        parseFloat(String(p.price).replace(/[^\d.]/g, "")) === numPrice
+    );
+    if (matchBoth) return matchBoth;
+  }
+
+  // 2. Exact name match
   if (cleanName) {
     const exact = pkgList.find((p) => p.name?.trim().toLowerCase() === cleanName);
     if (exact) return exact;
   }
 
+  // 3. Partial name match
   if (cleanName) {
     const partial = pkgList.find(
       (p) =>
@@ -269,6 +281,7 @@ export function findPackageByDetails(
     if (partial) return partial;
   }
 
+  // 4. Price match
   if (!isNaN(numPrice) && numPrice > 0) {
     const priceMatch = pkgList.find(
       (p) => parseFloat(String(p.price).replace(/[^\d.]/g, "")) === numPrice

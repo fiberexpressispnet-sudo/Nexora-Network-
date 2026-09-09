@@ -113,7 +113,7 @@ async function startServer() {
       }
 
       const cleanHost = sanitizeMikrotikHost(params.host);
-      const isExplicitDemo = Boolean(params.isDemo) || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1';
+      const isExplicitDemo = (process.env.MIKROTIK_MOCK_MODE === "true") || (Boolean(params.isDemo) || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
 
       if (isExplicitDemo) {
         const simInfo = getSimulatedRouterOS6Info({ ...params, host: cleanHost, isDemo: true });
@@ -230,33 +230,42 @@ async function startServer() {
 
   // 3. MikroTik Test Connection (Performs Real Socket Handshake & Auth)
   app.post("/api/mikrotik/test-connection", async (req, res) => {
-    const { host, port = 8728, username, password, isDemo } = req.body;
+    const rawBody = req.body || {};
+    const host = rawBody.host || rawBody.ip || rawBody.router?.ip;
+    const port = rawBody.port || rawBody.apiPort || rawBody.router?.apiPort || 8728;
+    const username = rawBody.username || rawBody.user || rawBody.router?.username;
+    const password = rawBody.password !== undefined ? rawBody.password : (rawBody.pass !== undefined ? rawBody.pass : (rawBody.router?.password || ''));
+    const isDemo = rawBody.isDemo !== undefined ? rawBody.isDemo : (rawBody.router?.isDemo || false);
+    const forceConnect = Boolean(rawBody.forceConnect || rawBody.allowStaging);
+
     try {
       if (!host || !username) {
-        return res.status(400).json({ success: false, connected: false, error: "Host and Username are required" });
+        return res.status(400).json({ success: false, connected: false, error: "Host/IP and Username are required" });
       }
 
       const cleanHost = sanitizeMikrotikHost(host);
-      const isExplicitDemo = Boolean(isDemo) || cleanHost === 'demo.mikrotik.local';
+      const isExplicitDemo = forceConnect || (process.env.MIKROTIK_MOCK_MODE === "true") || (Boolean(isDemo) || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
 
-      // Check if this is explicitly requested as demo/simulated router
+      // Check if this is explicitly requested as demo/simulated router or staging forced
       if (isExplicitDemo) {
         const info = getSimulatedRouterOS6Info({ host: cleanHost, port: Number(port), username, password, isDemo: true });
+        const routerData = {
+          identity: `MikroTik (${cleanHost})`,
+          version: info.version,
+          uptime: info.uptime,
+          cpuLoad: info.cpuLoad,
+          ramUsage: info.ramUsage,
+          host: cleanHost,
+          port,
+          isDemo: true,
+        };
         return res.json({
           success: true,
           connected: true,
           isDemo: true,
-          message: `MikroTik Simulator activated for (${cleanHost})`,
-          router: {
-            identity: `MikroTik-Simulator (${cleanHost})`,
-            version: info.version,
-            uptime: info.uptime,
-            cpuLoad: info.cpuLoad,
-            ramUsage: info.ramUsage,
-            host: cleanHost,
-            port,
-            isDemo: true,
-          },
+          message: `MikroTik active for (${cleanHost}) in Staging/Simulator Mode`,
+          router: routerData,
+          info: routerData,
         });
       }
 
@@ -300,6 +309,20 @@ async function startServer() {
 
         const usedRamMB = totalRamMB - freeRamMB;
 
+        const routerPayload = {
+          identity,
+          model: boardName,
+          version,
+          uptime,
+          cpu: cpuLoad,
+          cpuLoad,
+          ram: `${usedRamMB} MB / ${totalRamMB} MB`,
+          ramUsage: `${usedRamMB} MB / ${totalRamMB} MB`,
+          host: cleanHost,
+          port: targetPort,
+          isRealHardware: true,
+        };
+
         return res.json({
           success: true,
           connected: true,
@@ -307,19 +330,8 @@ async function startServer() {
           isRealHardware: true,
           protocol: isSsl ? 'API-SSL (8729)' : 'API Socket (8728)',
           message: `Original MikroTik Hardware (${cleanHost}:${targetPort}) successfully authenticated & connected!`,
-          router: {
-            identity,
-            model: boardName,
-            version,
-            uptime,
-            cpu: cpuLoad,
-            cpuLoad,
-            ram: `${usedRamMB} MB / ${totalRamMB} MB`,
-            ramUsage: `${usedRamMB} MB / ${totalRamMB} MB`,
-            host: cleanHost,
-            port: targetPort,
-            isRealHardware: true,
-          },
+          router: routerPayload,
+          info: routerPayload,
         });
       }
 
@@ -336,6 +348,20 @@ async function startServer() {
         const totalRamMB = Math.round((d['total-memory'] || 0) / 1048576);
         const usedRamMB = totalRamMB - freeRamMB;
 
+        const routerPayload = {
+          identity,
+          model: boardName,
+          version,
+          uptime,
+          cpu: cpuLoad,
+          cpuLoad,
+          ram: `${usedRamMB} MB / ${totalRamMB} MB`,
+          ramUsage: `${usedRamMB} MB / ${totalRamMB} MB`,
+          host: cleanHost,
+          port: targetPort,
+          isRealHardware: true,
+        };
+
         return res.json({
           success: true,
           connected: true,
@@ -343,19 +369,8 @@ async function startServer() {
           isRealHardware: true,
           protocol: 'RouterOS v7 REST API',
           message: `Original MikroTik Hardware (${cleanHost}) connected via RouterOS v7 REST API!`,
-          router: {
-            identity,
-            model: boardName,
-            version,
-            uptime,
-            cpu: cpuLoad,
-            cpuLoad,
-            ram: `${usedRamMB} MB / ${totalRamMB} MB`,
-            ramUsage: `${usedRamMB} MB / ${totalRamMB} MB`,
-            host: cleanHost,
-            port: targetPort,
-            isRealHardware: true,
-          },
+          router: routerPayload,
+          info: routerPayload,
         });
       }
 
@@ -422,7 +437,7 @@ async function startServer() {
       }
 
       const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : '';
-      const isExplicitDemo = !router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1';
+      const isExplicitDemo = (process.env.MIKROTIK_MOCK_MODE === "true") || (!router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
 
       if (isExplicitDemo) {
         const syncLog = {
@@ -899,7 +914,7 @@ async function startServer() {
       }
 
       const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : '';
-      const isExplicitDemo = !router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1';
+      const isExplicitDemo = (process.env.MIKROTIK_MOCK_MODE === "true") || (!router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
 
       if (isExplicitDemo) {
         return res.json({
@@ -1052,7 +1067,7 @@ async function startServer() {
       }
 
       const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : '';
-      const isExplicitDemo = !router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1';
+      const isExplicitDemo = (process.env.MIKROTIK_MOCK_MODE === "true") || (!router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
 
       if (isExplicitDemo) {
         return res.json({
@@ -1213,7 +1228,7 @@ async function startServer() {
       }
 
       const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : '';
-      const isExplicitDemo = !router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1';
+      const isExplicitDemo = (process.env.MIKROTIK_MOCK_MODE === "true") || (!router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
 
       if (isExplicitDemo) {
         return res.json({
@@ -1308,7 +1323,7 @@ async function startServer() {
     const { router } = req.body;
     try {
       const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : '';
-      const isExplicitDemo = !router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1';
+      const isExplicitDemo = (process.env.MIKROTIK_MOCK_MODE === "true") || (!router || router.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
 
       if (isExplicitDemo) {
         return res.json({
@@ -1548,8 +1563,8 @@ async function startServer() {
   // 11. FIBER EXPRESS CLIENT AI ASSISTANT & REAL-TIME LINE DIAGNOSTICS (GEMINI)
   // =========================================================================
 
-  function getAllLocalClients(): any[] {
-    const clientsRecord = localDb["feisp_clients"];
+   function getAllLocalClients(): any[] {
+    const clientsRecord = localDb["nexora_clients"];
     if (clientsRecord && Array.isArray(clientsRecord.value)) {
       return clientsRecord.value;
     }
@@ -1557,7 +1572,7 @@ async function startServer() {
   }
 
   function getAllLocalPackages(): any[] {
-    const pkgRecord = localDb["feisp_packages"];
+    const pkgRecord = localDb["nexora_packages"];
     if (pkgRecord && Array.isArray(pkgRecord.value) && pkgRecord.value.length > 0) {
       return pkgRecord.value;
     }
@@ -1571,7 +1586,7 @@ async function startServer() {
   }
 
   function getAllLocalSettings(): any {
-    const setRecord = localDb["feisp_settings"];
+    const setRecord = localDb["nexora_settings"];
     if (setRecord && setRecord.value) {
       return setRecord.value;
     }
@@ -1696,7 +1711,7 @@ async function startServer() {
       targetClient.status = 'online';
       targetClient.lastSync = new Date().toISOString();
       allClients[clientIndex] = targetClient;
-      localDb["feisp_clients"] = { value: allClients, updatedAt: Date.now() };
+      localDb["nexora_clients"] = { value: allClients, updatedAt: Date.now() };
       saveDb();
 
       res.json({

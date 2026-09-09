@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { RouterConfig, RouterInfo } from '../../types';
-import { Plug, Save, Cpu, HardDrive, Clock, Users, ShieldCheck, RefreshCw, Unlink, Link as LinkIcon } from 'lucide-react';
+import { Plug, Save, Cpu, HardDrive, Clock, Users, ShieldCheck, RefreshCw, Unlink, Link as LinkIcon, Zap } from 'lucide-react';
 
 interface MikrotikConfigureProps {
  routerConfig: RouterConfig;
@@ -35,7 +35,7 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  activeUsers: 42,
  });
 
- const handleTestConnection = async () => {
+ const handleTestConnection = async (isStaging = false) => {
  setTesting(true);
  setTestResult(null);
  try {
@@ -43,26 +43,33 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  method: 'POST',
  headers: { 'Content-Type': 'application/json' },
  body: JSON.stringify({
- ip,
- apiPort,
+ host: ip,
+ port: apiPort,
  username,
  password,
+ forceConnect: isStaging,
  }),
  });
  const data = await res.json();
  setTestResult(data);
 
- if (data.success) {
- if (data.info) {
+ if (data.connected || data.success) {
+ if (data.info || data.router) {
+ const infoObj = data.info || data.router;
  setLiveInfo({
- osVersion: data.info.version || 'RouterOS v7.x',
- uptime: data.info.uptime || '1 day',
- cpu: data.info.cpuLoad ? `${data.info.cpuLoad}%` : '8%',
- ram: data.info.ramUsage || '128 MB / 512 MB',
+ osVersion: infoObj.version || 'RouterOS v7.x',
+ uptime: infoObj.uptime || '1 day',
+ cpu: infoObj.cpuLoad ? `${infoObj.cpuLoad}%` : '8%',
+ ram: infoObj.ramUsage || '128 MB / 512 MB',
  activeUsers: data.activeUsersCount || 15,
  });
  }
- showToast(`✅ Router Connection Success! MikroTik ${data.info?.identity || data.info?.boardName || ip} is reachable and responding.`, 'success');
+ showToast(
+ data.isDemo
+ ? `✅ Staging Mode Verified! Simulated MikroTik active.`
+ : `✅ Router Connection Success! MikroTik ${data.info?.identity || data.info?.boardName || ip} is reachable and responding.`,
+ 'success',
+ );
  } else {
  showToast(data.error || 'Connection failed to MikroTik router.', 'error');
  }
@@ -198,15 +205,26 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  </div>
 
  <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-200/80 ">
+ <div className="flex items-center gap-2">
  <button
  type="button"
- onClick={handleTestConnection}
+ onClick={() => handleTestConnection(false)}
  disabled={testing}
- className="px-4 py-2 rounded-lg bg-slate-100 text-slate-800 text-xs font-semibold hover:bg-slate-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+ className="px-3.5 py-2 rounded-lg bg-slate-100 text-slate-800 text-xs font-semibold hover:bg-slate-200 transition-colors flex items-center gap-1.5 cursor-pointer"
  >
  <RefreshCw className={`w-3.5 h-3.5 ${testing ? 'animate-spin' : ''}`} />
- {testing ? 'Testing Ping...' : 'Test Connection'}
+ {testing ? 'Testing Ping...' : 'Live Test'}
  </button>
+ <button
+ type="button"
+ onClick={() => handleTestConnection(true)}
+ disabled={testing}
+ className="px-3.5 py-2 rounded-lg bg-teal-50 text-teal-700 border border-teal-200 text-xs font-semibold hover:bg-teal-100 transition-colors flex items-center gap-1.5 cursor-pointer"
+ >
+ <Zap className="w-3.5 h-3.5 text-teal-600" />
+ Staging Test
+ </button>
+ </div>
 
  <div className="flex gap-2">
  {routerConfig.connected ? (

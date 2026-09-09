@@ -1099,11 +1099,14 @@ export function MainApp({
     addAuditLog("Delete Router Node", id);
   };
 
-  const handleToggleRouterConnection = async (id: string) => {
+  const handleToggleRouterConnection = async (
+    id: string,
+    forceConnect = false,
+  ) => {
     const targetRouter = routers.find((r) => r.id === id);
     if (!targetRouter) return;
 
-    if (targetRouter.connected) {
+    if (targetRouter.connected && !forceConnect) {
       // Disconnecting
       setRouters((prev) =>
         prev.map((r) =>
@@ -1112,6 +1115,31 @@ export function MainApp({
       );
       showToast(`Router "${targetRouter.name}" disconnected`, "info");
       addAuditLog("Disconnect Router", targetRouter.name);
+      return;
+    }
+
+    if (forceConnect) {
+      setRouters((prev) =>
+        prev.map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                connected: true,
+                isDemo: true,
+                errorReason: "",
+                uptime: "14 days, 06:22:10",
+                version: "RouterOS v7.12",
+                cpu: "10%",
+                ram: "128 MB / 1024 MB",
+              }
+            : r,
+        ),
+      );
+      showToast(
+        `MikroTik Router "${targetRouter.name}" connected in Staging/Offline Mode!`,
+        "success",
+      );
+      addAuditLog("Connect Router (Staging)", targetRouter.name);
       return;
     }
 
@@ -1125,7 +1153,8 @@ export function MainApp({
       const isDemoRouter = Boolean(
         targetRouter.isDemo ||
         targetRouter.name.toLowerCase().includes("demo") ||
-        targetRouter.ip === "demo.mikrotik.local",
+        targetRouter.ip === "demo.mikrotik.local" ||
+        targetRouter.ip === "127.0.0.1",
       );
 
       const res = await fetch("/api/mikrotik/test-connection", {
@@ -1162,7 +1191,7 @@ export function MainApp({
 
         if (data.isDemo) {
           showToast(
-            `Demo MikroTik Simulator active (Testing/Preview Mode)`,
+            `MikroTik connected in Staging/Simulator Mode`,
             "success",
           );
         } else {
@@ -1177,19 +1206,22 @@ export function MainApp({
           "Success",
         );
       } else {
+        const isPriv = targetRouter.ip?.startsWith("192.168.") || targetRouter.ip?.startsWith("10.") || targetRouter.ip === "127.0.0.1";
         setRouters((prev) =>
           prev.map((r) =>
             r.id === id
               ? {
                   ...r,
                   connected: false,
-                  errorReason: data.errorClass || "Connection Failed",
+                  errorReason: data.errorClass || (isPriv ? "Private LAN IP" : "Connection Failed"),
                 }
               : r,
           ),
         );
         showToast(
-          `Connection failed: ${data.error || "Could not connect to MikroTik router IP."}`,
+          isPriv
+            ? `Private IP (${targetRouter.ip}) unreachable from cloud. Click "Connect (Staging Mode)" or configure MikroTik Cloud DDNS.`
+            : `Connection failed: ${data.error || "Could not connect to MikroTik router IP."}`,
           "error",
         );
         addAuditLog(

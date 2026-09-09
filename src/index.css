@@ -40,32 +40,7 @@ input, select, textarea {
   color-scheme: light;
 }
 
-/* 🚀 Ultra-Smooth Scrolling Performance & GPU Layer Promotion */
-main,
-header,
-aside,
-.overflow-y-auto,
-.overflow-x-auto,
-.animate-page-enter {
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-  transform: translateZ(0);
-  will-change: scroll-position;
-}
-
-/* Hardware accelerated backdrop-blur so blurs do not lag during scroll */
-.backdrop-blur-xl,
-.backdrop-blur-lg,
-.backdrop-blur-md,
-.backdrop-blur-sm,
-.backdrop-blur-xs,
-.backdrop-blur-2xl {
-  transform: translateZ(0);
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-}
-
-/* Fast responsive page entry animation */
+/* Page entry animation */
 @keyframes pageEnter {
   from {
     opacity: 0.9;
@@ -81,9 +56,3 @@ aside,
   animation: pageEnter 0.12s ease-out forwards;
 }
 
-/* Rendering performance containment for large content cards */
-.bg-white,
-.rounded-xl,
-.rounded-2xl {
-  contain: layout style;
-}

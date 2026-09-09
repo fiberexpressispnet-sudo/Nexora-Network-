@@ -42,7 +42,7 @@ import {
 import { db } from "../../lib/firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { sanitizeForStorage } from "../../lib/storageUtils";
-import { getClientExpiryInfo } from "../../lib/expiryUtils";
+import { getClientExpiryInfo, findPackageByDetails } from "../../lib/expiryUtils";
 import { initialPackages } from "../../data/initialData";
 import { ClientAiAssistant } from "../ClientAiAssistant";
 import { ClientBandwidthGraph } from "../ClientBandwidthGraph";
@@ -409,6 +409,16 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     };
     fetchPackages();
   }, []);
+
+  // Set initial selectedPackageId based on the client's current package name and price
+  useEffect(() => {
+    if (packages.length > 0 && activeClient) {
+      const matched = findPackageByDetails(packages, activeClient.package, activeClient.price);
+      if (matched) {
+        setSelectedPackageId(matched.id);
+      }
+    }
+  }, [packages, activeClient]);
 
   // 1-Click Line Auto-Fix & Re-sync for Client Dashboard
   const [isAutoFixing, setIsAutoFixing] = useState(false);

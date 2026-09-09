@@ -65,7 +65,7 @@ interface MikrotikManagementProps {
   onAddRouter?: (router: MikrotikRouter) => void;
   onUpdateRouter?: (router: MikrotikRouter) => void;
   onDeleteRouter?: (id: string) => void;
-  onToggleRouterConnection?: (id: string) => void;
+  onToggleRouterConnection?: (id: string, forceConnect?: boolean) => void;
   clients: Client[];
   packages?: Package[];
   bandwidthProfiles?: BandwidthProfile[];
@@ -171,6 +171,7 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
   // Router Management Modals
   const [isAddRouterOpen, setIsAddRouterOpen] = useState(false);
   const [isEditRouterOpen, setIsEditRouterOpen] = useState(false);
+  const [routerFormEditId, setRouterFormEditId] = useState<string | null>(null);
   const [isDeleteRouterOpen, setIsDeleteRouterOpen] = useState(false);
   const [isConnectionGuideOpen, setIsConnectionGuideOpen] = useState(false);
 
@@ -186,6 +187,9 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
   const [routerFormMode, setRouterFormMode] = useState<
     "Hotspot" | "PPPoE" | "Hybrid" | "Core"
   >("Hybrid");
+  const [routerFormConnected, setRouterFormConnected] = useState(true);
+  const [isTestingRouterModal, setIsTestingRouterModal] = useState(false);
+  const [routerModalTestResult, setRouterModalTestResult] = useState<any>(null);
 
   // Client Management Modals inside MikroTik Management
   const [isAddClientOpen, setIsAddClientOpen] = useState(false);
@@ -551,6 +555,7 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
 
   // Router Handlers
   const handleOpenAddRouter = () => {
+    setRouterFormEditId(null);
     setRouterFormName("");
     setRouterFormIp("");
     setRouterFormPort(8728);
@@ -560,7 +565,54 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
     setRouterFormLocation("");
     setRouterFormModel("RB4011iGS+RM");
     setRouterFormMode("Hybrid");
+    setRouterFormConnected(true);
+    setRouterModalTestResult(null);
     setIsAddRouterOpen(true);
+  };
+
+  const handleTestModalRouterConnection = async (isStaging = false) => {
+    if (!routerFormIp.trim() || !routerFormUser.trim()) {
+      showToast("Please enter Router IP and API Username to test", "warning");
+      return;
+    }
+    setIsTestingRouterModal(true);
+    setRouterModalTestResult(null);
+    try {
+      const res = await fetch("/api/mikrotik/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host: routerFormIp.trim(),
+          port: Number(routerFormPort) || 8728,
+          username: routerFormUser.trim(),
+          password: routerFormPass,
+          forceConnect: isStaging,
+        }),
+      });
+      const data = await res.json();
+      setRouterModalTestResult(data);
+      if (data.connected) {
+        showToast(
+          data.isDemo
+            ? `Verified in Staging/Simulator Mode!`
+            : `MikroTik hardware (${routerFormIp}) verified & connected successfully!`,
+          "success",
+        );
+        setRouterFormConnected(true);
+      } else {
+        const isPriv = isPrivateIp(routerFormIp.trim());
+        showToast(
+          isPriv
+            ? `Private LAN IP (${routerFormIp}) detected. You can activate it in Staging Mode or configure Public DDNS.`
+            : `Connection check failed: ${data.error || "Unreachable"}`,
+          "error",
+        );
+      }
+    } catch (err: any) {
+      showToast(`Test error: ${err.message}`, "error");
+    } finally {
+      setIsTestingRouterModal(false);
+    }
   };
 
   const handleSaveNewRouter = (e: React.FormEvent) => {
@@ -579,7 +631,7 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
       apiSslPort: Number(routerFormSslPort) || 8729,
       username: routerFormUser.trim() || "admin",
       password: routerFormPass,
-      connected: true,
+      connected: routerFormConnected,
       location: routerFormLocation.trim() || "Zone POP",
       model: routerFormModel,
       version: "RouterOS v7.12.1",
@@ -602,25 +654,35 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
     );
   };
 
-  const handleOpenEditRouter = () => {
-    setRouterFormName(currentRouter.name);
-    setRouterFormIp(currentRouter.ip);
-    setRouterFormPort(currentRouter.apiPort);
-    setRouterFormSslPort(currentRouter.apiSslPort);
-    setRouterFormUser(currentRouter.username);
-    setRouterFormPass(currentRouter.password || "");
-    setRouterFormLocation(currentRouter.location || "");
-    setRouterFormModel(currentRouter.model || "CCR1036-12G-4S");
-    setRouterFormMode(currentRouter.mode || "Core");
+  const handleOpenEditRouter = (routerToEdit?: any) => {
+    const isActualRouter =
+      routerToEdit &&
+      typeof routerToEdit === "object" &&
+      "id" in routerToEdit &&
+      "name" in routerToEdit;
+    const targetRouter = isActualRouter ? (routerToEdit as MikrotikRouter) : currentRouter;
+    if (!targetRouter) return;
+    setRouterFormEditId(targetRouter.id);
+    setRouterFormName(targetRouter.name || "");
+    setRouterFormIp(targetRouter.ip || "");
+    setRouterFormPort(targetRouter.apiPort || 8728);
+    setRouterFormSslPort(targetRouter.apiSslPort || 8729);
+    setRouterFormUser(targetRouter.username || "admin");
+    setRouterFormPass(targetRouter.password || "");
+    setRouterFormLocation(targetRouter.location || "");
+    setRouterFormModel(targetRouter.model || "CCR1036-12G-4S");
+    setRouterFormMode(targetRouter.mode || "Core");
+    setRouterFormConnected(Boolean(targetRouter.connected));
+    setRouterModalTestResult(null);
     setIsEditRouterOpen(true);
   };
 
   const handleSaveEditRouter = (e: React.FormEvent) => {
     e.preventDefault();
-    const oldName = currentRouter.name;
-    const oldId = currentRouter.id;
+    const editId = routerFormEditId || currentRouter.id;
+    const targetRouter = routers.find((r) => r.id === editId) || currentRouter;
     const updatedRouter: MikrotikRouter = {
-      ...currentRouter,
+      ...targetRouter,
       name: routerFormName.trim(),
       ip: routerFormIp.trim(),
       apiPort: Number(routerFormPort) || 8728,
@@ -630,21 +692,16 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
       location: routerFormLocation.trim(),
       model: routerFormModel,
       mode: routerFormMode,
+      connected: routerFormConnected,
+      errorReason: routerFormConnected ? "" : targetRouter.errorReason,
     };
 
     if (onUpdateRouter) {
       onUpdateRouter(updatedRouter);
     }
 
-    if (oldName !== updatedRouter.name) {
-      clients.forEach((c) => {
-        if (c.router === oldName || c.router === oldId) {
-          onUpdateClient({ ...c, router: updatedRouter.name });
-        }
-      });
-    }
-
     setIsEditRouterOpen(false);
+    setRouterFormEditId(null);
     showToast(
       `MikroTik Router "${updatedRouter.name}" configuration updated!`,
       "success",
@@ -845,8 +902,13 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handleOpenAddRouter}
-              className="px-3.5 py-1.5 rounded bg-gradient-to-r from-sky-600 to-cyan-600 hover:brightness-110 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleOpenAddRouter();
+              }}
+              className="px-3.5 py-2 rounded-lg bg-gradient-to-r from-sky-600 to-cyan-600 hover:brightness-110 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm touch-manipulation"
             >
               <Plus className="w-4 h-4" /> Add MikroTik Router
             </button>
@@ -911,18 +973,32 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-200/60 text-slate-800">
-                  <span className="flex items-center gap-1">
+                  <span className="flex items-center gap-1 shrink-0">
                     <Users className="w-3 h-3 text-sky-500" />
                     <strong>{rClientCount}</strong> Clients
                   </span>
-                  <span className="font-mono text-[10px] text-slate-800">
-                    {router.model || "RouterBoard"}
-                  </span>
-                  {isSelected && (
-                    <span className="text-[10px] font-bold text-sky-600 flex items-center gap-0.5">
-                      <Check className="w-3 h-3" /> Active
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[10px] text-slate-800">
+                      {router.model || "RouterBoard"}
                     </span>
-                  )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleOpenEditRouter(router);
+                      }}
+                      className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 hover:text-sky-600 transition-all cursor-pointer flex items-center justify-center border border-slate-200 touch-manipulation"
+                      title={`Edit properties for ${router.name}`}
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    {isSelected && (
+                      <span className="text-[10px] font-bold text-sky-600 flex items-center gap-0.5 shrink-0">
+                        <Check className="w-3 h-3" /> Active
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -1017,31 +1093,45 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
           </button>
 
           <button
-            onClick={handleOpenEditRouter}
-            className="px-3 py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleOpenEditRouter(currentRouter);
+            }}
+            className="px-3.5 py-1.5 rounded bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-slate-200 shadow-xs touch-manipulation"
           >
             <Edit2 className="w-3.5 h-3.5" /> Edit Router
           </button>
 
           {onToggleRouterConnection && (
-            <button
-              onClick={() => onToggleRouterConnection(currentRouter.id)}
-              className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                currentRouter.connected
-                  ? "bg-rose-500/15 text-rose-600 hover:bg-rose-500/25 border border-rose-500/30"
-                  : "bg-teal-600 text-white hover:bg-teal-700 shadow-sm"
-              }`}
-            >
+            <>
               {currentRouter.connected ? (
-                <>
+                <button
+                  onClick={() => onToggleRouterConnection(currentRouter.id, false)}
+                  className="px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-rose-500/15 text-rose-600 hover:bg-rose-500/25 border border-rose-500/30"
+                >
                   <Unlink className="w-3.5 h-3.5" /> Disconnect API
-                </>
+                </button>
               ) : (
-                <>
-                  <LinkIcon className="w-3.5 h-3.5" /> Connect Now
-                </>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => onToggleRouterConnection(currentRouter.id, false)}
+                    className="px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-sky-600 text-white hover:bg-sky-700 shadow-sm"
+                    title="Attempt direct live TCP socket connection"
+                  >
+                    <LinkIcon className="w-3.5 h-3.5" /> Connect Live
+                  </button>
+                  <button
+                    onClick={() => onToggleRouterConnection(currentRouter.id, true)}
+                    className="px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-teal-600 text-white hover:bg-teal-700 shadow-sm"
+                    title="Instantly activate this router in Staging / Simulator mode"
+                  >
+                    <Zap className="w-3.5 h-3.5" /> Connect (Staging)
+                  </button>
+                </div>
               )}
-            </button>
+            </>
           )}
 
           <button
@@ -1087,15 +1177,23 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
               <span className="font-bold text-slate-700 ">Solutions:</span>
               <span className="bg-white px-2.5 py-1 rounded-md shadow-2xs text-slate-900 border border-slate-200/60 flex items-center gap-1 font-semibold">
                 <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
-                Set up a Public WAN IP with Port Forwarding (8728) on your
-                router.
+                Set up a Public WAN IP with Port Forwarding (8728) on your router.
               </span>
               <span className="bg-white px-2.5 py-1 rounded-md shadow-2xs text-slate-900 border border-slate-200/60 flex items-center gap-1 font-semibold">
                 <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
-                Or enable <strong>Router Simulator Mode</strong> for offline
-                testing and preview.
+                Or connect in <strong>Staging / Simulator Mode</strong> for offline testing and preview.
               </span>
             </div>
+            {onToggleRouterConnection && (
+              <div className="pt-2">
+                <button
+                  onClick={() => onToggleRouterConnection(currentRouter.id, true)}
+                  className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                >
+                  <Zap className="w-3.5 h-3.5" /> Force Connect in Staging / Simulator Mode
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2160,6 +2258,72 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
             </div>
           </div>
 
+          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-slate-800">Connection State Upon Creation</span>
+              <p className="text-[11px] text-slate-500">Enable to activate this router immediately for billing and subscriber management.</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={routerFormConnected}
+                onChange={(e) => setRouterFormConnected(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-600"></div>
+            </label>
+          </div>
+
+          <div className="p-3 bg-sky-50/60 rounded-lg border border-sky-100 flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-sky-800 font-bold text-xs">
+                <Zap className="w-3.5 h-3.5 text-sky-600" />
+                <span>Verify MikroTik Credentials</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={isTestingRouterModal}
+                  onClick={() => handleTestModalRouterConnection(false)}
+                  className="px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                >
+                  {isTestingRouterModal ? (
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <LinkIcon className="w-3 h-3" />
+                  )}
+                  Live Test
+                </button>
+                <button
+                  type="button"
+                  disabled={isTestingRouterModal}
+                  onClick={() => handleTestModalRouterConnection(true)}
+                  className="px-2.5 py-1 rounded bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                >
+                  <Zap className="w-3 h-3" />
+                  Staging Mode
+                </button>
+              </div>
+            </div>
+            {routerModalTestResult && (
+              <div className={`p-2 rounded text-[11px] font-medium border flex items-start gap-1.5 ${
+                routerModalTestResult.connected
+                  ? "bg-teal-50 text-teal-800 border-teal-200"
+                  : "bg-rose-50 text-rose-800 border-rose-200"
+              }`}>
+                {routerModalTestResult.connected ? (
+                  <Check className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
+                ) : (
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <span className="font-bold">{routerModalTestResult.connected ? "Success: " : "Notice: "}</span>
+                  <span>{routerModalTestResult.message || routerModalTestResult.error}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 ">
             <button
               type="button"
@@ -2181,13 +2345,16 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
       {/* MODAL: EDIT MIKROTIK ROUTER */}
       <Modal
         isOpen={isEditRouterOpen}
-        onClose={() => setIsEditRouterOpen(false)}
-        title={`Edit Router: ${currentRouter.name}`}
+        onClose={() => {
+          setIsEditRouterOpen(false);
+          setRouterFormEditId(null);
+        }}
+        title={`Edit Router: ${routers.find((r) => r.id === routerFormEditId)?.name || currentRouter.name}`}
       >
         <form onSubmit={handleSaveEditRouter} className="space-y-4 text-xs">
           <div>
             <label className="block font-bold text-slate-700 mb-1">
-              Router Name
+              Router Name / Identifier *
             </label>
             <input
               type="text"
@@ -2198,10 +2365,10 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-bold text-slate-700 mb-1">
-                Router IP
+                Router IP Address *
               </label>
               <input
                 type="text"
@@ -2222,6 +2389,22 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
                 onChange={(e) => setRouterFormPort(Number(e.target.value))}
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 font-mono"
               />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 mb-1">
+                Router Mode
+              </label>
+              <select
+                value={routerFormMode}
+                onChange={(e) => setRouterFormMode(e.target.value as any)}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 font-semibold"
+              >
+                <option value="Hybrid">Hybrid (PPPoE + Hotspot)</option>
+                <option value="Hotspot">Hotspot Gateway</option>
+                <option value="PPPoE">PPPoE Server</option>
+                <option value="Core">Core Gateway</option>
+              </select>
             </div>
           </div>
 
@@ -2253,10 +2436,107 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
             </div>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-bold text-slate-700 mb-1">
+                Hardware Model
+              </label>
+              <input
+                type="text"
+                value={routerFormModel}
+                onChange={(e) => setRouterFormModel(e.target.value)}
+                placeholder="e.g. RB4011 / CCR2004"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 font-semibold"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 mb-1">
+                Physical Location / POP
+              </label>
+              <input
+                type="text"
+                value={routerFormLocation}
+                onChange={(e) => setRouterFormLocation(e.target.value)}
+                placeholder="e.g. Sector 10 Tower"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 font-semibold"
+              />
+            </div>
+          </div>
+
+          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-slate-800">Connection State</span>
+              <p className="text-[11px] text-slate-500">Toggle to mark this router as active/connected or offline/standby.</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={routerFormConnected}
+                onChange={(e) => setRouterFormConnected(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-600"></div>
+            </label>
+          </div>
+
+          <div className="p-3 bg-sky-50/60 rounded-lg border border-sky-100 flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-sky-800 font-bold text-xs">
+                <Zap className="w-3.5 h-3.5 text-sky-600" />
+                <span>Verify Credentials & Socket Ping</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={isTestingRouterModal}
+                  onClick={() => handleTestModalRouterConnection(false)}
+                  className="px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                >
+                  {isTestingRouterModal ? (
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <LinkIcon className="w-3 h-3" />
+                  )}
+                  Live Test
+                </button>
+                <button
+                  type="button"
+                  disabled={isTestingRouterModal}
+                  onClick={() => handleTestModalRouterConnection(true)}
+                  className="px-2.5 py-1 rounded bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                >
+                  <Zap className="w-3 h-3" />
+                  Staging Mode
+                </button>
+              </div>
+            </div>
+            {routerModalTestResult && (
+              <div className={`p-2 rounded text-[11px] font-medium border flex items-start gap-1.5 ${
+                routerModalTestResult.connected
+                  ? "bg-teal-50 text-teal-800 border-teal-200"
+                  : "bg-rose-50 text-rose-800 border-rose-200"
+              }`}>
+                {routerModalTestResult.connected ? (
+                  <Check className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
+                ) : (
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <span className="font-bold">{routerModalTestResult.connected ? "Success: " : "Notice: "}</span>
+                  <span>{routerModalTestResult.message || routerModalTestResult.error}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 ">
             <button
               type="button"
-              onClick={() => setIsEditRouterOpen(false)}
+              onClick={() => {
+                setIsEditRouterOpen(false);
+                setRouterFormEditId(null);
+              }}
               className="px-4 py-2 rounded-lg border border-slate-200 text-slate-900 font-bold"
             >
               Cancel
