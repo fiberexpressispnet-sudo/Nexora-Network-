@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { RouterConfig, RouterInfo } from '../../types';
 import { Plug, Save, Cpu, HardDrive, Clock, Users, ShieldCheck, RefreshCw, Unlink, Link as LinkIcon, Zap } from 'lucide-react';
+import { getAdminHeaders } from '../../lib/apiClient';
 
 interface MikrotikConfigureProps {
  routerConfig: RouterConfig;
@@ -41,7 +42,7 @@ export const MikrotikConfigurePage: React.FC<MikrotikConfigureProps> = ({
  try {
  const res = await fetch('/api/mikrotik/test-connection', {
  method: 'POST',
- headers: { 'Content-Type': 'application/json' },
+ headers: getAdminHeaders(),
  body: JSON.stringify({
  host: ip,
  port: apiPort,

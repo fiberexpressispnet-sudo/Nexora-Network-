@@ -106,10 +106,12 @@ import { IntroScreen } from "./components/IntroScreen";
 import { TechBackground, TouchSparkleOverlay } from "./components/TechEffects";
 import { PinLockScreen } from "./components/PinLockScreen";
 import { getClientExpiryInfo, addDaysToExpiry, parseValidityDays, findPackageByDetails } from "./lib/expiryUtils";
+import { generateNormalizedUsername } from "./lib/userUtils";
 import { BillingModal } from "./components/flowforge/BillingModal";
 import { ImportWizard } from "./components/flowforge/ImportWizard";
 import { TownViewModal } from "./components/flowforge/TownViewModal";
 import { sanitizeForStorage } from "./lib/storageUtils";
+import { getAdminHeaders, adminFetch } from "./lib/apiClient";
 
 const writeTimeouts: Record<string, any> = {};
 const firstTimeInitAttempted = new Set<string>();
@@ -186,10 +188,10 @@ function usePersistentState<T>(
       clearTimeout(writeTimeouts[key]);
     }
 
-    // 1. Instantly Sync with local/server backend database with explicit timestamp
+    // 1. Instantly Sync with local/server backend database with authenticated headers
     fetch("/api/db/set", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAdminHeaders(),
       body: JSON.stringify({ key, value: sanitized, updatedAt: now }),
     }).catch((err) => console.warn("Backend db/set sync warning:", err));
 
@@ -248,7 +250,9 @@ function usePersistentState<T>(
 
     // A. Express Backend Database sync (Fast, zero-quota, cross-device reliable)
     const syncWithBackend = () => {
-      fetch(`/api/db/get?key=${key}`)
+      fetch(`/api/db/get?key=${key}`, {
+        headers: getAdminHeaders(),
+      })
         .then((res) => res.json())
         .then((data) => {
           if (data.success && data.value !== null) {
@@ -258,7 +262,7 @@ function usePersistentState<T>(
             const initialData = sanitizeForStorage(stateRef.current);
             fetch("/api/db/set", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: getAdminHeaders(),
               body: JSON.stringify({ key, value: initialData, updatedAt: Date.now() }),
             }).catch(() => {});
           }
@@ -682,11 +686,12 @@ export function MainApp({
       const pkg = findPackageByDetails(packages, order.packageName, orderPrice);
       const validityDays = parseValidityDays(pkg?.validity, order.packageName, orderPrice);
       const newExpiry = addDaysToExpiry(undefined, validityDays);
+      const finalUserId = order.userId || generateNormalizedUsername(order.clientName, order.phone);
       updatedClient = {
         id: order.clientId || `CLI-${Date.now()}`,
         name: order.clientName,
         phone: order.phone,
-        userId: order.userId,
+        userId: finalUserId,
         password: order.password || "123456",
         package: order.packageName,
         bandwidth: order.bandwidth,
@@ -1985,10 +1990,38 @@ export function MainApp({
     } catch (e) {
       // ignore
     }
-    showToast(
-      `⚡ Package "${pkg.name}" created and synced to MikroTik Hotspot portal!`,
-      "success",
-    );
+
+    // Call real MikroTik RouterOS package profile sync endpoint
+    const activeRouter = routers.find((r) => r.id === selectedRouterId) || routers[0];
+    if (activeRouter) {
+      fetch("/api/mikrotik/sync-package", {
+        method: "POST",
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ router: activeRouter, package: pkg }),
+      })
+        .then((res) => res.json())
+        .then((resData) => {
+          if (resData.success) {
+            showToast(
+              `⚡ Package "${pkg.name}" created and synced to MikroTik (/ip hotspot user profile)!`,
+              "success",
+            );
+          } else {
+            showToast(
+              `⚠️ Package saved locally, but MikroTik sync failed: ${resData.error || resData.message || "Router unreachable"}`,
+              "warning",
+            );
+          }
+        })
+        .catch((err) => {
+          showToast(`⚠️ Package saved locally. MikroTik sync network error.`, "warning");
+        });
+    } else {
+      showToast(
+        `⚡ Package "${pkg.name}" created and updated in Hotspot portal!`,
+        "success",
+      );
+    }
   };
 
   const handleUpdatePackage = (pkg: Package) => {
@@ -2002,10 +2035,38 @@ export function MainApp({
     } catch (e) {
       // ignore
     }
-    showToast(
-      `⚡ Package "${pkg.name}" updated and synced to Hotspot portal!`,
-      "info",
-    );
+
+    // Call real MikroTik RouterOS package profile sync endpoint
+    const activeRouter = routers.find((r) => r.id === selectedRouterId) || routers[0];
+    if (activeRouter) {
+      fetch("/api/mikrotik/sync-package", {
+        method: "POST",
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ router: activeRouter, package: pkg }),
+      })
+        .then((res) => res.json())
+        .then((resData) => {
+          if (resData.success) {
+            showToast(
+              `⚡ Package "${pkg.name}" updated and profile synced to MikroTik!`,
+              "success",
+            );
+          } else {
+            showToast(
+              `⚠️ Package updated locally, but MikroTik sync failed: ${resData.error || resData.message || "Router unreachable"}`,
+              "warning",
+            );
+          }
+        })
+        .catch(() => {
+          showToast(`⚠️ Package updated. MikroTik sync network error.`, "warning");
+        });
+    } else {
+      showToast(
+        `⚡ Package "${pkg.name}" updated and synced to Hotspot portal!`,
+        "info",
+      );
+    }
   };
 
   const handleDeletePackage = (id: number) => {
@@ -2141,7 +2202,10 @@ export function MainApp({
         hour12: true,
       });
 
-      const targetUserId = createdUserId || targetReq.phone;
+      const targetUserId =
+        createdUserId ||
+        targetReq.createdUserId ||
+        generateNormalizedUsername(targetReq.clientName, targetReq.phone);
       const targetRouter =
         routers.find((r) => r.id === selectedRouterId) ||
         routers.find((r) => r.mode === "Hotspot" || r.mode === "Hybrid") ||
@@ -2679,6 +2743,8 @@ export function MainApp({
               <HotspotConfigPage
                 packages={packages}
                 settings={settings}
+                routers={routers}
+                selectedRouterId={selectedRouterId}
                 onAddHotspotRequest={handleAddHotspotRequest}
                 showToast={showToast}
               />

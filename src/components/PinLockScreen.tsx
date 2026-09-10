@@ -12,6 +12,7 @@ import {
   Unlock,
 } from 'lucide-react';
 import { AppSettings } from '../types';
+import { setAdminToken } from '../lib/apiClient';
 
 interface PinLockScreenProps {
   settings: AppSettings;
@@ -117,6 +118,21 @@ export const PinLockScreen: React.FC<PinLockScreenProps> = ({
       if (isMatch) {
         setStatus('success');
         setErrorMessage(null);
+
+        // Authenticate with server to acquire secure admin session token
+        fetch('/api/auth/admin-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: entered }),
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success && d.token) {
+              setAdminToken(d.token);
+            }
+          })
+          .catch(() => {});
+
         setTimeout(() => {
           onUnlock();
         }, 350);

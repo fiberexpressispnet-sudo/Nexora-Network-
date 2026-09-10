@@ -4,6 +4,7 @@ import {
   AppSettings,
   Package,
   HotspotPackageRequest,
+  MikrotikRouter,
 } from "../../types";
 import {
   Code,
@@ -23,10 +24,13 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { Modal } from "../Modal";
+import { getAdminHeaders } from "../../lib/apiClient";
 
 interface HotspotConfigProps {
   packages?: Package[];
   settings: AppSettings;
+  routers?: MikrotikRouter[];
+  selectedRouterId?: string;
   onAddHotspotRequest?: (
     req: Omit<HotspotPackageRequest, "id" | "requestedAt" | "status">,
   ) => void;
@@ -762,12 +766,15 @@ export const buildDynamicHotspotHtml = (
  return;
  }
 
- const username = 'fe' + Math.floor(10000 + Math.random() * 90000);
+ const cleanName = (name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+ const baseName = cleanName.length > 0 ? cleanName : 'user';
+ const cleanPhone = (phone || '').replace(/[^0-9]/g, '');
+ const username = baseName + cleanPhone;
  const password = 'pass' + Math.floor(1000 + Math.random() * 9000);
  const totalText = document.getElementById('totalBill').innerText;
 
  const purchaseData = {
- clientName: name,
+ clientName: name || ('Hotspot Client ' + phone),
  phone: phone,
  package: currentPackage.name,
  price: totalText.replace('৳', ''),
@@ -775,7 +782,7 @@ export const buildDynamicHotspotHtml = (
  downloadSpeed: currentPackage.speed,
  uploadSpeed: currentPackage.speed,
  gateway: selectedGateway,
- transaction: trxId || 'N/A',
+ transaction: trxId || ('CASH-' + Math.floor(100000 + Math.random() * 900000)),
  duration: parseInt(document.getElementById('durationSelect').value) || 1,
  createdUserId: username,
  createdPassword: password,
@@ -783,24 +790,23 @@ export const buildDynamicHotspotHtml = (
  ipAddress: '$(ip)'
  };
 
- // Post message to parent app window or opener
- if (window.parent && window.parent !== window) {
- window.parent.postMessage({ type: 'NEXORA_HOTSPOT_REQUEST', data: purchaseData }, '*');
- }
- if (window.opener) {
- window.opener.postMessage({ type: 'NEXORA_HOTSPOT_REQUEST', data: purchaseData }, '*');
- }
-
- // Save to LocalStorage sync
+ // Send to server API
  try {
- const reqs = JSON.parse(localStorage.getItem('nexora_hotspot_requests') || '[]');
- reqs.unshift({
- id: 'REQ-' + Math.floor(100 + Math.random() * 900),
- ...purchaseData,
- requestedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
- status: 'pending'
- });
- localStorage.setItem('nexora_hotspot_requests', JSON.stringify(reqs));
+ fetch('/api/hotspot/purchase', {
+ method: 'POST',
+ headers: { 'Content-Type': 'application/json' },
+ body: JSON.stringify({
+ name: purchaseData.clientName,
+ phone: purchaseData.phone,
+ package: purchaseData.package,
+ speed: purchaseData.bandwidth,
+ total: purchaseData.price,
+ gateway: purchaseData.gateway,
+ transaction: purchaseData.transaction,
+ username: username,
+ password: password
+ })
+ }).catch(function() {});
  } catch(e) {}
 
  document.getElementById('resUsername').innerText = username;
@@ -845,6 +851,8 @@ export const buildDynamicHotspotHtml = (
 export const HotspotConfigPage: React.FC<HotspotConfigProps> = ({
   packages = [],
   settings,
+  routers = [],
+  selectedRouterId,
   onAddHotspotRequest,
   showToast,
 }) => {
@@ -864,6 +872,11 @@ export const HotspotConfigPage: React.FC<HotspotConfigProps> = ({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [deploying, setDeploying] = useState(false);
   const [deploySuccess, setDeploySuccess] = useState(false);
+  const [deployDetails, setDeployDetails] = useState<{ filePath?: string; bytes?: number } | null>(null);
+  const [deployError, setDeployError] = useState<string | null>(null);
+
+  const [applyingWalledGarden, setApplyingWalledGarden] = useState(false);
+  const [walledGardenVerified, setWalledGardenVerified] = useState<boolean | null>(null);
 
   const [previewUser, setPreviewUser] = useState("");
   const [previewPass, setPreviewPass] = useState("");
@@ -928,22 +941,96 @@ export const HotspotConfigPage: React.FC<HotspotConfigProps> = ({
     showToast("Hotspot login HTML code saved locally!", "success");
   };
 
-  const handleDeploy = () => {
+  const targetRouter =
+    routers.find((r) => r.id === selectedRouterId) ||
+    routers.find((r) => r.mode === "Hotspot" || r.mode === "Hybrid") ||
+    routers[0];
+
+  const handleDeploy = async () => {
+    if (!targetRouter) {
+      showToast("No active router configured for Hotspot deployment", "warning");
+      return;
+    }
+
     setDeploying(true);
     setDeploySuccess(false);
+    setDeployError(null);
     showToast(
-      "Deploying hotspot files to MikroTik router /flash/hotspot...",
+      `Deploying live hotspot template to MikroTik (${targetRouter.name})...`,
       "info",
     );
 
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/mikrotik/deploy-hotspot", {
+        method: "POST",
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          router: targetRouter,
+          htmlContent: hotspotHtml,
+          filename: "login.html",
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDeploySuccess(true);
+        setDeployDetails({
+          filePath: data.filePath || "hotspot/login.html",
+          bytes: data.bytesWritten,
+        });
+        showToast(
+          `⚡ Hotspot login page successfully uploaded and verified on MikroTik (${data.filePath || "hotspot/login.html"})!`,
+          "success",
+        );
+      } else {
+        const errMsg = data.error || data.message || "Failed to deploy to RouterOS";
+        setDeployError(errMsg);
+        showToast(`❌ MikroTik Deployment Failed: ${errMsg}`, "error");
+      }
+    } catch (err: any) {
+      setDeployError(err.message || "Network request failed");
+      showToast(`❌ Deployment Error: ${err.message}`, "error");
+    } finally {
       setDeploying(false);
-      setDeploySuccess(true);
-      showToast(
-        "Hotspot login page deployed successfully to MikroTik router!",
-        "success",
-      );
-    }, 2000);
+    }
+  };
+
+  const handleApplyWalledGarden = async () => {
+    if (!targetRouter) {
+      showToast("No active router configured", "warning");
+      return;
+    }
+
+    setApplyingWalledGarden(true);
+    const domainToAllow = window.location.hostname || "localhost";
+    showToast(`Applying Walled Garden rule for "${domainToAllow}" to MikroTik...`, "info");
+
+    try {
+      const res = await fetch("/api/mikrotik/walled-garden/apply", {
+        method: "POST",
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          router: targetRouter,
+          domain: domainToAllow,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setWalledGardenVerified(true);
+        showToast(
+          `✅ Walled Garden rule applied and verified on MikroTik for ${domainToAllow}!`,
+          "success",
+        );
+      } else {
+        setWalledGardenVerified(false);
+        showToast(`❌ Walled Garden error: ${data.error || "Failed to apply rule"}`, "error");
+      }
+    } catch (err: any) {
+      setWalledGardenVerified(false);
+      showToast(`❌ Error: ${err.message}`, "error");
+    } finally {
+      setApplyingWalledGarden(false);
+    }
   };
 
   const handleResetDefault = () => {
@@ -1026,20 +1113,41 @@ export const HotspotConfigPage: React.FC<HotspotConfigProps> = ({
 
       {/* Deploy Status Alert */}
       {deploySuccess && (
-        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded p-4 text-xs text-emerald-600 flex items-center justify-between">
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded p-4 text-xs text-emerald-700 flex items-center justify-between">
           <div className="flex items-center gap-2 font-medium">
             <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
             <span>
-              <strong>Success!</strong> Hotspot login page deployed to MikroTik
-              directory{" "}
-              <code className="font-mono bg-emerald-500/20 px-1.5 py-0.5 rounded">
-                /flash/hotspot/login.html
+              <strong>Success!</strong> Hotspot login page deployed and verified on MikroTik router:{" "}
+              <code className="font-mono bg-emerald-500/20 px-1.5 py-0.5 rounded text-emerald-900 font-bold">
+                {deployDetails?.filePath || "hotspot/login.html"}
               </code>
+              {deployDetails?.bytes && (
+                <span className="text-[11px] text-emerald-600 ml-2 font-semibold">
+                  ({(deployDetails.bytes / 1024).toFixed(1)} KB verified)
+                </span>
+              )}
             </span>
           </div>
-          <span className="text-[10px] text-slate-800">
+          <span className="text-[10px] text-slate-500 font-mono">
             {new Date().toLocaleTimeString()}
           </span>
+        </div>
+      )}
+
+      {deployError && (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded p-4 text-xs text-rose-700 flex items-center justify-between">
+          <div className="flex items-center gap-2 font-medium">
+            <AlertCircle className="w-5 h-5 text-rose-500 shrink-0" />
+            <span>
+              <strong>Deployment Failed:</strong> {deployError}
+            </span>
+          </div>
+          <button
+            onClick={handleDeploy}
+            className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-[11px] font-bold cursor-pointer"
+          >
+            Retry Deploy
+          </button>
         </div>
       )}
 
@@ -1182,16 +1290,31 @@ export const HotspotConfigPage: React.FC<HotspotConfigProps> = ({
                 </div>
               </div>
 
-              <div className="p-3 rounded bg-amber-50/80 border border-amber-200/50 space-y-1 mt-4">
-                <span className="text-[10px] font-bold text-amber-700 uppercase flex items-center gap-1">
-                  <AlertCircle className="w-3.5 h-3.5" /> Walled Garden Required
-                </span>
+              <div className="p-3.5 rounded bg-amber-50/90 border border-amber-200 space-y-2 mt-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-amber-800 uppercase flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" /> Walled Garden Authorization
+                  </span>
+                  {walledGardenVerified && (
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Verified on Router
+                    </span>
+                  )}
+                </div>
                 <p className="text-slate-800 text-[11px] leading-relaxed">
-                  For online package purchases to work before a client logs in, you MUST allow this software's domain in your MikroTik Walled Garden:
+                  Allows unauthenticated clients to connect to this billing backend so that online purchases succeed before login.
                 </p>
-                <div className="font-mono text-amber-900 font-bold bg-amber-100/50 p-1.5 rounded text-[11px] mt-1 break-all select-all">
+                <div className="font-mono text-amber-950 font-bold bg-amber-100/70 p-2 rounded text-[11px] break-all select-all border border-amber-200/60">
                   /ip hotspot walled-garden add dst-host={window.location.hostname}
                 </div>
+                <button
+                  onClick={handleApplyWalledGarden}
+                  disabled={applyingWalledGarden}
+                  className="w-full py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  {applyingWalledGarden ? "Applying Rule to Router..." : "Apply Walled Garden Rule to MikroTik"}
+                </button>
               </div>
             </div>
           </div>

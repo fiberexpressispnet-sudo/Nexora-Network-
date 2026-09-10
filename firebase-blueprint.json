@@ -1,84 +1,46 @@
 {
-  "description": "Fiber Express ISP Management Data",
-  "collections": {
-    "users": {
-      "description": "User specific data",
-      "document": {
-        "uid": "string",
-        "collections": {
-          "clients": {
-            "description": "ISP Clients",
-            "document": {
-              "id": "string",
-              "name": "string",
-              "status": "string"
-            }
-          },
-          "packages": {
-            "description": "ISP Packages",
-            "document": {
-              "id": "string",
-              "name": "string"
-            }
-          },
-          "bandwidthProfiles": {
-            "description": "Bandwidth Profiles",
-            "document": {
-              "id": "string",
-              "name": "string"
-            }
-          },
-          "daysProfiles": {
-            "description": "Days Profiles",
-            "document": {
-              "id": "string",
-              "name": "string"
-            }
-          },
-          "hotspotUsers": {
-            "description": "Hotspot Users",
-            "document": {
-              "id": "string",
-              "name": "string"
-            }
-          },
-          "hotspotRequests": {
-            "description": "Hotspot Requests",
-            "document": {
-              "id": "string",
-              "name": "string"
-            }
-          },
-          "settings": {
-            "description": "App Settings",
-            "document": {
-              "id": "string",
-              "appName": "string"
-            }
-          },
-          "routerConfig": {
-            "description": "Router Config",
-            "document": {
-              "id": "string",
-              "connected": "boolean"
-            }
-          },
-          "notifications": {
-            "description": "Notifications",
-            "document": {
-              "id": "string",
-              "title": "string"
-            }
-          },
-          "auditLogs": {
-            "description": "Audit Logs",
-            "document": {
-              "id": "string",
-              "action": "string"
-            }
-          }
+  "entities": {
+    "ispData": {
+      "title": "ISP Workspace Data",
+      "description": "Schema for workspace persistent collections and settings",
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "object",
+          "description": "State payload"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Timestamp of update"
         }
-      }
+      },
+      "required": ["updatedAt"]
+    },
+    "userAppData": {
+      "title": "User Application Data",
+      "description": "User-specific settings and preferences",
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "object",
+          "description": "User state data"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Timestamp of update"
+        }
+      },
+      "required": ["updatedAt"]
+    }
+  },
+  "firestore": {
+    "/ispWorkspace/mainData/collections/{collectionKey}": {
+      "schema": "ispData",
+      "description": "Central ISP configuration and management collections"
+    },
+    "/users/{userId}/appData/{key}": {
+      "schema": "userAppData",
+      "description": "Individual user scoped app preferences"
     }
   }
 }

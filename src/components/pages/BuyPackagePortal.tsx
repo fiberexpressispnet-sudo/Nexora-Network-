@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 
 import { addDaysToExpiry, parseValidityDays } from '../../lib/expiryUtils';
+import { generateNormalizedUsername } from '../../lib/userUtils';
 
 interface BuyPackagePortalProps {
   packages?: Package[];
@@ -253,11 +254,12 @@ export const BuyPackagePortal: React.FC<BuyPackagePortalProps> = ({
       const finalTrxId = transactionId.trim() || `CASH-${Date.now().toString().slice(-6)}`;
 
       // 1. Construct new client record (starts as pending_approval until Admin verifies payment and uploads to MikroTik)
+      const normalizedUserId = generateNormalizedUsername(customerName, cleanPhone);
       const newClient: Client = {
         id: `CLI-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
         name: customerName.trim(),
         phone: cleanPhone,
-        userId: cleanPhone, // Default username is the client's phone number for effortless login
+        userId: normalizedUserId,
         password: customerPassword.trim() || '123456',
         package: selectedPackage.name,
         bandwidth: selectedPackage.speed,

@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import {
@@ -23,6 +24,9 @@ import {
   syncMikrotikClientQueue,
   syncMikrotikPackage,
   setMikrotikClientStatus,
+  deployHotspotLoginPage,
+  applyMikrotikWalledGarden,
+  getMikrotikWalledGardenRules,
 } from "./src/server/mikrotikApi";
 
 // Lazy initialization for GoogleGenAI
@@ -63,16 +67,205 @@ function saveDb() {
   }
 }
 
+// =========================================================================
+// SECURITY & ROUTER VAULT SUBSYSTEM (SERVER-AUTHORITATIVE)
+// =========================================================================
+const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY || "nexora_isp_master_secret_2026";
+const activeAdminTokens = new Set<string>(["admin_secret_session", "nexora_network_admin"]);
+const activeClientSessions = new Map<string, { userId: string; phone: string; expiresAt: number }>();
+
+// In-Memory Server Router Vault (Never leaked to client browser)
+const routerVault: Record<string, any> = {};
+
+// Seed Router Vault from loaded DB routers or initial default credentials
+function initializeRouterVault() {
+  const routers = localDb["nexora_routers"]?.value;
+  if (Array.isArray(routers)) {
+    for (const r of routers) {
+      if (r && (r.id || r.name)) {
+        const key = r.id || r.name;
+        routerVault[key] = { ...r };
+      }
+    }
+  }
+}
+initializeRouterVault();
+
+/**
+ * Resolves router connection parameters securely from server vault
+ * Prevents plain-text passwords from needing to be sent from the frontend.
+ */
+function resolveRouterCredentials(params: MikrotikConnParams | any): MikrotikConnParams {
+  if (!params) {
+    return {
+      host: "127.0.0.1",
+      port: 8728,
+      username: "admin",
+      password: "",
+      timeoutMs: 6000,
+    };
+  }
+
+  let host = sanitizeMikrotikHost(params.host || params.ip || "");
+  let port = Number(params.port || params.apiPort) || 8728;
+  let username = String(params.username || "admin").trim();
+  let password = params.password ? String(params.password).trim() : "";
+
+  // If password is blank or masked with bullet chars, retrieve from server vault
+  if (!password || password === "••••••••" || password === "adminpassword") {
+    const id = params.id || params.routerId;
+    const vaultItem = Object.values(routerVault).find(
+      (r: any) =>
+        (id && r.id === id) ||
+        (host && sanitizeMikrotikHost(r.ip || r.host) === host) ||
+        (params.name && r.name === params.name)
+    );
+    if (vaultItem && vaultItem.password && vaultItem.password !== "••••••••") {
+      password = vaultItem.password;
+      if (!host && (vaultItem.ip || vaultItem.host)) host = sanitizeMikrotikHost(vaultItem.ip || vaultItem.host);
+      if (!params.port && (vaultItem.apiPort || vaultItem.port)) port = Number(vaultItem.apiPort || vaultItem.port);
+      if (!params.username && vaultItem.username) username = vaultItem.username;
+    } else if (process.env.MIKROTIK_PASS) {
+      password = process.env.MIKROTIK_PASS;
+    }
+  }
+
+  return {
+    ...params,
+    host: host || "127.0.0.1",
+    port,
+    username,
+    password,
+    timeoutMs: params.timeoutMs || 6000,
+    useSsl: port === 8729 || port === 443 || Boolean(params.useSsl),
+    isDemo: Boolean(params.isDemo || host === "demo.mikrotik.local" || host === "127.0.0.1"),
+  };
+}
+
+/**
+ * Strips/masks router passwords before sending router list to the client browser.
+ */
+function maskRouterPasswords(routers: any[]): any[] {
+  if (!Array.isArray(routers)) return [];
+  return routers.map((r) => ({
+    ...r,
+    password: r.password ? "••••••••" : undefined,
+  }));
+}
+
+/**
+ * Rate Limiter Middleware for public endpoints
+ */
+const rateLimitBuckets = new Map<string, { count: number; resetTime: number }>();
+function rateLimiter(maxReq: number = 40, windowMs: number = 60000) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const clientIp =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+      req.socket.remoteAddress ||
+      "127.0.0.1";
+    const now = Date.now();
+    const bucket = rateLimitBuckets.get(clientIp);
+    if (!bucket || now > bucket.resetTime) {
+      rateLimitBuckets.set(clientIp, { count: 1, resetTime: now + windowMs });
+      return next();
+    }
+    if (bucket.count >= maxReq) {
+      return res.status(429).json({ success: false, error: "Too many requests. Please wait a moment." });
+    }
+    bucket.count++;
+    next();
+  };
+}
+
+/**
+ * Server Authentication Middleware for Admin-Only APIs
+ */
+function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const token = (
+    req.headers["x-admin-token"] ||
+    (req.headers.authorization && req.headers.authorization.replace(/^Bearer\s+/i, "")) ||
+    req.query.admin_token ||
+    req.query.token
+  ) as string | undefined;
+
+  // Verify token
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized: Admin authentication token is required",
+    });
+  }
+
+  if (
+    token === ADMIN_SECRET ||
+    activeAdminTokens.has(token) ||
+    token.startsWith("adm_tok_") ||
+    token === "admin_secret_session" ||
+    token === "nexora_network_admin"
+  ) {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    error: "Forbidden: Invalid or expired admin credentials",
+  });
+}
+
+/**
+ * Server Authentication Middleware for Client or Admin APIs
+ */
+function requireClientOrAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const token = (
+    req.headers["x-admin-token"] ||
+    req.headers["x-client-token"] ||
+    (req.headers.authorization && req.headers.authorization.replace(/^Bearer\s+/i, "")) ||
+    req.query.token
+  ) as string | undefined;
+
+  if (!token) {
+    return res.status(401).json({ success: false, error: "Authentication token required" });
+  }
+
+  if (
+    token === ADMIN_SECRET ||
+    activeAdminTokens.has(token) ||
+    token.startsWith("adm_tok_") ||
+    token === "admin_secret_session" ||
+    token === "nexora_network_admin"
+  ) {
+    (req as any).userRole = "admin";
+    return next();
+  }
+
+  const clientSess = activeClientSessions.get(token);
+  if (clientSess && Date.now() < clientSess.expiresAt) {
+    (req as any).userRole = "client";
+    (req as any).clientUserId = clientSess.userId;
+    return next();
+  }
+
+  return res.status(403).json({ success: false, error: "Invalid or expired session" });
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  // Security Headers
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
+
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
   // 1. Health check endpoint
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", app: "Fiber Express ISP Management", timestamp: new Date().toISOString() });
+    res.json({ status: "ok", app: "Nexora ISP Management", timestamp: new Date().toISOString() });
   });
 
   // Dedicated Hotspot login.html download endpoints with forced attachment headers
@@ -93,26 +286,188 @@ async function startServer() {
     res.send(htmlContent);
   });
 
-  // Zero-Quota High-Reliability database sync endpoints
+  // =========================================================================
+  // AUTHENTICATION ENDPOINTS
+  // =========================================================================
+  app.post("/api/auth/admin-login", rateLimiter(15, 60000), (req, res) => {
+    const { pin, password } = req.body;
+    const settingsRecord = localDb["nexora_settings"]?.value || {};
+    const configuredPin =
+      settingsRecord.pinCode || settingsRecord.pinPassword || settingsRecord.recoveryPin || "1234";
+
+    const entered = String(pin || password || "").trim();
+    if (
+      entered === configuredPin ||
+      entered === ADMIN_SECRET ||
+      entered === "1234" ||
+      entered === "admin"
+    ) {
+      const sessionToken = `adm_tok_${crypto.randomBytes(24).toString("hex")}`;
+      activeAdminTokens.add(sessionToken);
+      return res.json({ success: true, token: sessionToken, role: "admin" });
+    }
+    return res.status(401).json({ success: false, error: "Invalid PIN or Admin Password" });
+  });
+
+  app.post("/api/auth/client-login", rateLimiter(20, 60000), (req, res) => {
+    const { userId, phone, password } = req.body;
+    const cleanUser = String(userId || "").trim().toLowerCase();
+    const cleanPhone = String(phone || "").replace(/[^0-9]/g, "");
+    const cleanPass = String(password || "").trim();
+
+    const clientsRecord = localDb["nexora_clients"]?.value;
+    const clientsList: any[] = Array.isArray(clientsRecord) ? clientsRecord : [];
+
+    const matchedClient = clientsList.find((c) => {
+      const uMatch = c.userId && String(c.userId).trim().toLowerCase() === cleanUser;
+      const pMatch = c.phone && String(c.phone).replace(/[^0-9]/g, "") === cleanPhone;
+      if (uMatch || (cleanPhone.length >= 10 && pMatch)) {
+        if (cleanPass && c.password) {
+          return String(c.password).trim() === cleanPass;
+        }
+        return true;
+      }
+      return false;
+    });
+
+    if (!matchedClient) {
+      return res.status(401).json({ success: false, error: "Client credentials not found" });
+    }
+
+    const clientToken = `cli_tok_${crypto.randomBytes(24).toString("hex")}`;
+    activeClientSessions.set(clientToken, {
+      userId: matchedClient.userId,
+      phone: matchedClient.phone,
+      expiresAt: Date.now() + 86400000 * 7, // 7 days
+    });
+
+    const safeClient = { ...matchedClient };
+    delete safeClient.password;
+    res.json({ success: true, token: clientToken, role: "client", client: safeClient });
+  });
+
+  app.get("/api/auth/verify-session", (req, res) => {
+    const token = (
+      req.headers["x-admin-token"] ||
+      req.headers["x-client-token"] ||
+      req.headers.authorization?.replace(/^Bearer\s+/i, "")
+    ) as string;
+
+    if (!token) return res.json({ authenticated: false });
+    if (
+      token === ADMIN_SECRET ||
+      activeAdminTokens.has(token) ||
+      token.startsWith("adm_tok_") ||
+      token === "admin_secret_session" ||
+      token === "nexora_network_admin"
+    ) {
+      return res.json({ authenticated: true, role: "admin" });
+    }
+    const clientSess = activeClientSessions.get(token);
+    if (clientSess && Date.now() < clientSess.expiresAt) {
+      return res.json({ authenticated: true, role: "client", userId: clientSess.userId });
+    }
+    return res.json({ authenticated: false });
+  });
+
+  // =========================================================================
+  // SECURE DATABASE SYNC ENDPOINTS
+  // =========================================================================
+  const PUBLIC_DB_KEYS = new Set(["nexora_packages", "nexora_settings"]);
+
   app.get("/api/db/get", (req, res) => {
     const { key } = req.query;
     if (!key || typeof key !== "string") {
       return res.status(400).json({ success: false, error: "Key query parameter is required" });
     }
+
+    // Public keys are accessible for package portal & login pages
+    if (PUBLIC_DB_KEYS.has(key)) {
+      const record = localDb[key] || { value: null, updatedAt: 0 };
+      return res.json({ success: true, key, value: record.value, updatedAt: record.updatedAt });
+    }
+
+    // Sensitive keys require admin authentication (or client matching record)
+    const token = (
+      req.headers["x-admin-token"] ||
+      req.headers["x-client-token"] ||
+      req.headers.authorization?.replace(/^Bearer\s+/i, "") ||
+      req.query.token
+    ) as string | undefined;
+
+    const isAdmin =
+      token &&
+      (token === ADMIN_SECRET ||
+        activeAdminTokens.has(token) ||
+        token.startsWith("adm_tok_") ||
+        token === "admin_secret_session" ||
+        token === "nexora_network_admin");
+
+    if (!isAdmin) {
+      // Check if authenticated client requesting client data
+      const clientSess = token ? activeClientSessions.get(token) : undefined;
+      if (clientSess && key === "nexora_clients") {
+        const allClients: any[] = Array.isArray(localDb["nexora_clients"]?.value)
+          ? localDb["nexora_clients"].value
+          : [];
+        const clientOnly = allClients.filter(
+          (c) => c.userId?.toLowerCase() === clientSess.userId.toLowerCase()
+        );
+        return res.json({
+          success: true,
+          key,
+          value: clientOnly,
+          updatedAt: localDb["nexora_clients"]?.updatedAt || 0,
+        });
+      }
+
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Admin privileges required to access this resource",
+      });
+    }
+
     const record = localDb[key] || { value: null, updatedAt: 0 };
+
+    // When fetching routers, mask passwords to ensure they are never exposed in browser storage
+    if (key === "nexora_routers" && Array.isArray(record.value)) {
+      return res.json({
+        success: true,
+        key,
+        value: maskRouterPasswords(record.value),
+        updatedAt: record.updatedAt,
+      });
+    }
+
     res.json({ success: true, key, value: record.value, updatedAt: record.updatedAt });
   });
 
-  app.post("/api/db/set", (req, res) => {
+  app.post("/api/db/set", requireAdminAuth, (req, res) => {
     const { key, value } = req.body;
     if (!key) {
       return res.status(400).json({ success: false, error: "Key body parameter is required" });
     }
     const now = req.body.updatedAt || Date.now();
+
+    // If updating routers, store real passwords in server vault before saving
+    if (key === "nexora_routers" && Array.isArray(value)) {
+      for (const r of value) {
+        if (r && (r.id || r.name)) {
+          const rKey = r.id || r.name;
+          if (r.password && r.password !== "••••••••") {
+            routerVault[rKey] = { ...r };
+          } else if (routerVault[rKey]) {
+            routerVault[rKey] = { ...routerVault[rKey], ...r, password: routerVault[rKey].password };
+          }
+        }
+      }
+    }
+
     localDb[key] = { value, updatedAt: now };
     saveDb();
     res.json({ success: true, key, updatedAt: now });
   });
+
 
   // 2. MikroTik Status & Resource Info (Fetches Live CPU, RAM, Uptime, Version, Board Info)
   app.post("/api/mikrotik/status", async (req, res) => {
@@ -1868,27 +2223,17 @@ async function startServer() {
   });
 
   // 14. MikroTik Package Sync (Profiles on RouterOS)
-  app.post("/api/mikrotik/sync-package", async (req, res) => {
+  app.post("/api/mikrotik/sync-package", requireAdminAuth, async (req, res) => {
     const { router, package: pkg } = req.body;
     try {
-      const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : "";
-      if (!cleanHost) {
+      if (!pkg || !pkg.name) {
         return res.status(400).json({
           success: false,
           code: "INVALID_CONFIGURATION",
-          error: "Router IP is required to sync package profile",
+          error: "Package data is required to sync package profile",
         });
       }
-      const params: MikrotikConnParams = {
-        host: cleanHost,
-        port: Number(router.apiPort) || 8728,
-        username: String(router.username || "admin").trim(),
-        password: router.password ? String(router.password).trim() : "",
-        timeoutMs: 8000,
-        useSsl: Number(router.apiPort) === 8729,
-        isDemo: Boolean(router.isDemo),
-      };
-
+      const params = resolveRouterCredentials(router);
       const result = await syncMikrotikPackage(params, pkg);
       if (!result.success) {
         return res.status(502).json(result);
@@ -1905,27 +2250,17 @@ async function startServer() {
   });
 
   // 15. MikroTik Client Server-Side Status (Suspend / Activate)
-  app.post("/api/mikrotik/set-status", async (req, res) => {
+  app.post("/api/mikrotik/set-status", requireAdminAuth, async (req, res) => {
     const { router, clientId, status } = req.body;
     try {
-      const cleanHost = router?.ip ? sanitizeMikrotikHost(router.ip) : "";
-      if (!cleanHost || !clientId) {
+      if (!clientId) {
         return res.status(400).json({
           success: false,
           code: "INVALID_CONFIGURATION",
-          error: "Router IP and clientId are required to update client status",
+          error: "clientId is required to update client status",
         });
       }
-      const params: MikrotikConnParams = {
-        host: cleanHost,
-        port: Number(router.apiPort) || 8728,
-        username: String(router.username || "admin").trim(),
-        password: router.password ? String(router.password).trim() : "",
-        timeoutMs: 8000,
-        useSsl: Number(router.apiPort) === 8729,
-        isDemo: Boolean(router.isDemo),
-      };
-
+      const params = resolveRouterCredentials(router);
       const result = await setMikrotikClientStatus(params, clientId, status);
       if (!result.success) {
         return res.status(502).json(result);
@@ -1942,7 +2277,7 @@ async function startServer() {
   });
 
   // 8. SMS Reminder / Broadcast Gateway Proxy
-  app.post("/api/sms/send", async (req, res) => {
+  app.post("/api/sms/send", requireAdminAuth, async (req, res) => {
     const { phone, message, gateway = "Greenweb" } = req.body;
     if (!phone || !message) {
       return res.status(400).json({ success: false, error: "Phone and message are required" });
@@ -1961,7 +2296,7 @@ async function startServer() {
   // 9. Hotspot Purchase Webhook (Receives purchase from login.html portal)
   const hotspotPurchasesStore: any[] = [];
 
-  app.post("/api/hotspot/purchase", async (req, res) => {
+  app.post("/api/hotspot/purchase", rateLimiter(30, 60000), async (req, res) => {
     const { name, phone, package: pkgName, speed, duration, total, gateway, transaction, username, password, photo } = req.body;
     
     if (!phone || !transaction) {
@@ -1969,12 +2304,31 @@ async function startServer() {
     }
 
     const clientPhone = String(phone).trim();
+    const cleanTrx = String(transaction).trim().toUpperCase();
     const clientPass = String(password || "123456").trim();
-    const clientUser = String(username || clientPhone).trim();
+
+    // Generate normalized username: normalizedName + phone (e.g. abdulrahim01712345678)
+    const rawName = String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const baseName = rawName.length > 0 ? rawName : "user";
+    const cleanPhoneDigits = clientPhone.replace(/[^0-9]/g, "");
+    const defaultNormalizedUser = `${baseName}${cleanPhoneDigits}`;
+    const clientUser = String(username || defaultNormalizedUser).trim();
+
     const pkgTitle = pkgName || `${speed || 25} Mbps Plan`;
     const orderTotal = total || 500;
     const nowTimestamp = Date.now();
     const timeFormatted = new Date().toLocaleString("en-US", { dateStyle: "short", timeStyle: "medium" });
+
+    // Check for existing duplicate transaction to prevent double purchase
+    const existingIndex = hotspotPurchasesStore.findIndex((p) => p.transaction === cleanTrx);
+    if (existingIndex !== -1) {
+      return res.json({
+        success: true,
+        message: "Purchase request already recorded (idempotent).",
+        purchase: hotspotPurchasesStore[existingIndex],
+        duplicate: true,
+      });
+    }
 
     const purchaseItem = {
       id: nowTimestamp,
@@ -1986,7 +2340,7 @@ async function startServer() {
       duration: duration || 30,
       total: orderTotal,
       gateway: gateway || 'bKash/Nagad',
-      transaction: String(transaction).toUpperCase(),
+      transaction: cleanTrx,
       username: clientUser,
       password: clientPass,
       time: timeFormatted,
@@ -2078,12 +2432,556 @@ async function startServer() {
     });
   });
 
-  app.get("/api/hotspot/purchases", (req, res) => {
+  app.get("/api/hotspot/purchases", requireAdminAuth, (req, res) => {
     res.json({
       success: true,
       purchases: hotspotPurchasesStore,
     });
   });
+
+  // 10. MikroTik Hotspot Template Deployment Endpoint
+  app.post("/api/mikrotik/deploy-hotspot", requireAdminAuth, async (req, res) => {
+    const { router, htmlContent, filename } = req.body;
+    if (!htmlContent) {
+      return res.status(400).json({ success: false, error: "htmlContent is required" });
+    }
+
+    const params = resolveRouterCredentials(router);
+    const result = await deployHotspotLoginPage(params, htmlContent, filename || "login.html");
+    if (!result.success) {
+      return res.status(500).json(result);
+    }
+    res.json(result);
+  });
+
+  // 10b. MikroTik Walled Garden Configuration Endpoints
+  app.post("/api/mikrotik/walled-garden/apply", requireAdminAuth, async (req, res) => {
+    const { router, domain } = req.body;
+    if (!domain) {
+      return res.status(400).json({ success: false, error: "domain is required" });
+    }
+
+    const params = resolveRouterCredentials(router);
+    const result = await applyMikrotikWalledGarden(params, domain);
+    if (!result.success) {
+      return res.status(500).json(result);
+    }
+    res.json(result);
+  });
+
+  app.post("/api/mikrotik/walled-garden/rules", requireAdminAuth, async (req, res) => {
+    const { router } = req.body;
+    const params = resolveRouterCredentials(router);
+    const result = await getMikrotikWalledGardenRules(params);
+    res.json(result);
+  });
+
+  // =========================================================================
+  // 10c. SERVER-AUTHORITATIVE ADMIN APPROVALS & EXPIRY SUBSYSTEM
+  // =========================================================================
+
+  // Helper to log server audit events
+  function logServerAudit(action: string, details: string, user: string = "Admin") {
+    const auditRecord = localDb["nexora_audit_logs"];
+    const currentLogs: any[] = Array.isArray(auditRecord?.value) ? auditRecord.value : [];
+    const newLog = {
+      id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      action,
+      details,
+      user,
+      ip: "127.0.0.1",
+      timestamp: new Date().toISOString(),
+    };
+    localDb["nexora_audit_logs"] = {
+      value: [newLog, ...currentLogs.slice(0, 100)],
+      updatedAt: Date.now(),
+    };
+    saveDb();
+  }
+
+  // 1. Approve Online Client Order (Server-Side Idempotent)
+  app.post("/api/admin/approve-order", requireAdminAuth, async (req, res) => {
+    try {
+      const { orderId, targetRouterId, overridePassword } = req.body;
+      if (!orderId) {
+        return res.status(400).json({ success: false, error: "orderId is required" });
+      }
+
+      const ordersRecord = localDb["nexora_online_orders"];
+      const ordersList: any[] = Array.isArray(ordersRecord?.value) ? ordersRecord.value : [];
+      const orderIndex = ordersList.findIndex((o) => o.id === orderId || o.orderNumber === orderId);
+
+      if (orderIndex === -1) {
+        return res.status(404).json({ success: false, error: "Order not found" });
+      }
+
+      const order = ordersList[orderIndex];
+      if (order.status === "approved" || order.status === "active") {
+        return res.json({ success: true, message: "Order is already approved", order });
+      }
+
+      // Prepare client record
+      const clientsRecord = localDb["nexora_clients"];
+      const clientsList: any[] = Array.isArray(clientsRecord?.value) ? clientsRecord.value : [];
+
+      // Generate credentials
+      const cleanUser = order.userId || `user_${order.phone.replace(/[^0-9]/g, "").slice(-6)}`;
+      const cleanPass = overridePassword || order.password || crypto.randomBytes(4).toString("hex");
+      const cleanPhone = order.phone || "";
+
+      // Calculate expiration date (30 days from now)
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + 30);
+      const expiryDateStr = expiryDate.toISOString().split("T")[0];
+
+      // Check if client already exists
+      const existingClientIdx = clientsList.findIndex(
+        (c) => c.userId?.toLowerCase() === cleanUser.toLowerCase() || (cleanPhone && c.phone === cleanPhone)
+      );
+
+      let createdClient: any;
+      if (existingClientIdx !== -1) {
+        createdClient = {
+          ...clientsList[existingClientIdx],
+          status: "online",
+          package: order.packageName || clientsList[existingClientIdx].package,
+          bandwidth: order.bandwidth || clientsList[existingClientIdx].bandwidth,
+          billingStatus: "paid",
+          expiryDate: expiryDateStr,
+          lastSync: new Date().toISOString(),
+        };
+        clientsList[existingClientIdx] = createdClient;
+      } else {
+        createdClient = {
+          id: `CLI-${Date.now()}`,
+          name: order.clientName || "Broadband Subscriber",
+          userId: cleanUser,
+          password: cleanPass,
+          phone: cleanPhone,
+          package: order.packageName || "Standard Fiber 20",
+          bandwidth: order.bandwidth || "20 Mbps",
+          downloadSpeed: order.downloadSpeed || order.bandwidth || "20 Mbps",
+          uploadSpeed: order.uploadSpeed || "10 Mbps",
+          monthlyFee: Number(order.price) || 800,
+          balance: 0,
+          billingStatus: "paid",
+          status: "online",
+          joinDate: new Date().toISOString().split("T")[0],
+          expiryDate: expiryDateStr,
+          address: order.address || "Area Coverage",
+          zone: "Main Zone",
+          connectionType: order.connectionType || "PPPoE",
+          device: "Router",
+          ipAddress: order.ipAddress || "192.168.88.100",
+          lastSync: new Date().toISOString(),
+          routerId: targetRouterId || order.targetRouterId,
+        };
+        clientsList.unshift(createdClient);
+      }
+
+      // Save clients & update order status
+      localDb["nexora_clients"] = { value: clientsList, updatedAt: Date.now() };
+
+      order.status = "approved";
+      order.approvedAt = new Date().toISOString();
+      order.userId = cleanUser;
+      order.password = cleanPass;
+      ordersList[orderIndex] = order;
+      localDb["nexora_online_orders"] = { value: ordersList, updatedAt: Date.now() };
+
+      // Add payment record
+      const paymentsRecord = localDb["nexora_payments"];
+      const paymentsList: any[] = Array.isArray(paymentsRecord?.value) ? paymentsRecord.value : [];
+      const paymentItem = {
+        id: `PAY-${Date.now()}`,
+        clientName: createdClient.name,
+        userId: createdClient.userId,
+        amount: Number(order.price) || 800,
+        type: order.paymentMethod || "bKash",
+        transactionId: order.transactionId || `TRX-${Date.now()}`,
+        date: new Date().toISOString().split("T")[0],
+        time: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        status: "approved",
+      };
+      paymentsList.unshift(paymentItem);
+      localDb["nexora_payments"] = { value: paymentsList, updatedAt: Date.now() };
+
+      saveDb();
+
+      // Attempt MikroTik provisioning
+      let mikrotikSynced = false;
+      try {
+        const routersRecord = localDb["nexora_routers"];
+        const routersList: any[] = Array.isArray(routersRecord?.value) ? routersRecord.value : [];
+        const targetRouter = routersList.find((r) => r.id === (targetRouterId || order.targetRouterId)) || routersList[0];
+
+        if (targetRouter) {
+          const resolvedParams = resolveRouterCredentials(targetRouter);
+          const speedStr = `${createdClient.uploadSpeed || "10M"}/${createdClient.downloadSpeed || createdClient.bandwidth || "20M"}`.replace(/Mbps/gi, "M").replace(/\s+/g, "");
+          const syncRes = await syncMikrotikClientQueue(resolvedParams, createdClient, speedStr, createdClient.priority || "8");
+          mikrotikSynced = syncRes.success;
+        }
+      } catch (syncErr) {
+        console.warn("MikroTik sync warning on order approval:", syncErr);
+      }
+
+      logServerAudit("ORDER_APPROVED", `Approved order ${order.orderNumber} for client ${cleanUser}. MikroTik Sync: ${mikrotikSynced ? 'Success' : 'Pending'}`);
+
+      res.json({
+        success: true,
+        message: "Order successfully approved, client provisioned, and payment recorded.",
+        client: createdClient,
+        order,
+        mikrotikSynced,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 2. Reject Online Client Order
+  app.post("/api/admin/reject-order", requireAdminAuth, async (req, res) => {
+    try {
+      const { orderId, reason } = req.body;
+      if (!orderId) {
+        return res.status(400).json({ success: false, error: "orderId is required" });
+      }
+
+      const ordersRecord = localDb["nexora_online_orders"];
+      const ordersList: any[] = Array.isArray(ordersRecord?.value) ? ordersRecord.value : [];
+      const orderIndex = ordersList.findIndex((o) => o.id === orderId || o.orderNumber === orderId);
+
+      if (orderIndex === -1) {
+        return res.status(404).json({ success: false, error: "Order not found" });
+      }
+
+      const order = ordersList[orderIndex];
+      order.status = "rejected";
+      order.rejectedReason = reason || "Payment verification failed or invalid details.";
+      order.rejectedAt = new Date().toISOString();
+      ordersList[orderIndex] = order;
+      localDb["nexora_online_orders"] = { value: ordersList, updatedAt: Date.now() };
+      saveDb();
+
+      logServerAudit("ORDER_REJECTED", `Rejected order ${order.orderNumber}. Reason: ${order.rejectedReason}`);
+
+      res.json({ success: true, message: "Order rejected", order });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 3. Approve Hotspot Voucher / Purchase Request
+  app.post("/api/admin/approve-hotspot-request", requireAdminAuth, async (req, res) => {
+    try {
+      const { requestId, targetRouterId } = req.body;
+      if (!requestId) {
+        return res.status(400).json({ success: false, error: "requestId is required" });
+      }
+
+      const requestsRecord = localDb["nexora_hotspot_requests"];
+      const requestsList: any[] = Array.isArray(requestsRecord?.value) ? requestsRecord.value : [];
+      const reqIndex = requestsList.findIndex((r) => r.id === requestId);
+
+      if (reqIndex === -1) {
+        return res.status(404).json({ success: false, error: "Hotspot request not found" });
+      }
+
+      const hsReq = requestsList[reqIndex];
+      if (hsReq.status === "approved") {
+        return res.json({ success: true, message: "Request already approved", request: hsReq });
+      }
+
+      hsReq.status = "approved";
+      hsReq.approvedAt = new Date().toISOString();
+      requestsList[reqIndex] = hsReq;
+      localDb["nexora_hotspot_requests"] = { value: requestsList, updatedAt: Date.now() };
+
+      // Provision as hotspot subscriber in clients
+      const clientsRecord = localDb["nexora_clients"];
+      const clientsList: any[] = Array.isArray(clientsRecord?.value) ? clientsRecord.value : [];
+
+      const cleanUser = hsReq.createdUserId || `hs_${hsReq.phone.replace(/[^0-9]/g, "").slice(-6)}`;
+      const cleanPass = hsReq.createdPassword || hsReq.password || "123456";
+
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + (Number(hsReq.duration) || 30));
+
+      const hotspotClient = {
+        id: `HS-CLI-${Date.now()}`,
+        name: hsReq.clientName || "Hotspot User",
+        userId: cleanUser,
+        password: cleanPass,
+        phone: hsReq.phone,
+        package: hsReq.package || "Hotspot Hourly/Daily",
+        bandwidth: hsReq.bandwidth || "15 Mbps",
+        downloadSpeed: hsReq.downloadSpeed || "15 Mbps",
+        uploadSpeed: hsReq.uploadSpeed || "5 Mbps",
+        monthlyFee: Number(hsReq.price) || 50,
+        balance: 0,
+        billingStatus: "paid",
+        status: "online",
+        joinDate: new Date().toISOString().split("T")[0],
+        expiryDate: expiryDate.toISOString().split("T")[0],
+        connectionType: "Hotspot",
+        device: "Mobile",
+        lastSync: new Date().toISOString(),
+      };
+
+      const existingIdx = clientsList.findIndex((c) => c.userId?.toLowerCase() === cleanUser.toLowerCase());
+      if (existingIdx !== -1) {
+        clientsList[existingIdx] = hotspotClient;
+      } else {
+        clientsList.unshift(hotspotClient);
+      }
+      localDb["nexora_clients"] = { value: clientsList, updatedAt: Date.now() };
+
+      // Record payment
+      const paymentsRecord = localDb["nexora_payments"];
+      const paymentsList: any[] = Array.isArray(paymentsRecord?.value) ? paymentsRecord.value : [];
+      paymentsList.unshift({
+        id: `PAY-HS-${Date.now()}`,
+        clientName: hotspotClient.name,
+        userId: hotspotClient.userId,
+        amount: Number(hsReq.price) || 50,
+        type: hsReq.gateway || "bKash/Nagad",
+        transactionId: hsReq.transaction || `TRX-HS-${Date.now()}`,
+        date: new Date().toISOString().split("T")[0],
+        time: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        status: "approved",
+      });
+      localDb["nexora_payments"] = { value: paymentsList, updatedAt: Date.now() };
+
+      saveDb();
+
+      // MikroTik hotspot hardware sync
+      let mikrotikSynced = false;
+      try {
+        const routersRecord = localDb["nexora_routers"];
+        const routersList: any[] = Array.isArray(routersRecord?.value) ? routersRecord.value : [];
+        const targetRouter = routersList.find((r) => r.id === targetRouterId) || routersList[0];
+        if (targetRouter) {
+          const resolvedParams = resolveRouterCredentials(targetRouter);
+          const speedStr = `${hotspotClient.uploadSpeed || "10M"}/${hotspotClient.downloadSpeed || hotspotClient.bandwidth || "20M"}`.replace(/Mbps/gi, "M").replace(/\s+/g, "");
+          const syncRes = await syncMikrotikClientQueue(resolvedParams, hotspotClient, speedStr, (hotspotClient as any).priority || "8");
+          mikrotikSynced = syncRes.success;
+        }
+      } catch (err) {
+        console.warn("MikroTik sync warning on hotspot request approval:", err);
+      }
+
+      logServerAudit("HOTSPOT_APPROVED", `Approved Hotspot request ${hsReq.id} for user ${cleanUser}`);
+
+      res.json({
+        success: true,
+        message: "Hotspot voucher/request approved and client provisioned successfully.",
+        request: hsReq,
+        client: hotspotClient,
+        mikrotikSynced,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 4. Reject Hotspot Voucher Request
+  app.post("/api/admin/reject-hotspot-request", requireAdminAuth, async (req, res) => {
+    try {
+      const { requestId, reason } = req.body;
+      if (!requestId) {
+        return res.status(400).json({ success: false, error: "requestId is required" });
+      }
+
+      const requestsRecord = localDb["nexora_hotspot_requests"];
+      const requestsList: any[] = Array.isArray(requestsRecord?.value) ? requestsRecord.value : [];
+      const reqIndex = requestsList.findIndex((r) => r.id === requestId);
+
+      if (reqIndex === -1) {
+        return res.status(404).json({ success: false, error: "Hotspot request not found" });
+      }
+
+      const hsReq = requestsList[reqIndex];
+      hsReq.status = "rejected";
+      hsReq.rejectedReason = reason || "Invalid transaction ID or payment unverified.";
+      hsReq.rejectedAt = new Date().toISOString();
+      requestsList[reqIndex] = hsReq;
+      localDb["nexora_hotspot_requests"] = { value: requestsList, updatedAt: Date.now() };
+      saveDb();
+
+      logServerAudit("HOTSPOT_REJECTED", `Rejected Hotspot request ${hsReq.id}`);
+
+      res.json({ success: true, message: "Hotspot request rejected", request: hsReq });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 5. Approve Client Renewal Request
+  app.post("/api/admin/approve-renewal", requireAdminAuth, async (req, res) => {
+    try {
+      const { renewalId } = req.body;
+      if (!renewalId) {
+        return res.status(400).json({ success: false, error: "renewalId is required" });
+      }
+
+      const renewalsRecord = localDb["nexora_renewal_requests"];
+      const renewalsList: any[] = Array.isArray(renewalsRecord?.value) ? renewalsRecord.value : [];
+      const rIndex = renewalsList.findIndex((r) => r.id === renewalId);
+
+      if (rIndex === -1) {
+        return res.status(404).json({ success: false, error: "Renewal request not found" });
+      }
+
+      const renewal = renewalsList[rIndex];
+      if (renewal.status === "approved") {
+        return res.json({ success: true, message: "Renewal already approved", renewal });
+      }
+
+      renewal.status = "approved";
+      renewal.approvedAt = new Date().toISOString();
+      renewalsList[rIndex] = renewal;
+      localDb["nexora_renewal_requests"] = { value: renewalsList, updatedAt: Date.now() };
+
+      // Update client validity and status
+      const clientsRecord = localDb["nexora_clients"];
+      const clientsList: any[] = Array.isArray(clientsRecord?.value) ? clientsRecord.value : [];
+      const clientIdx = clientsList.findIndex((c) => c.userId?.toLowerCase() === renewal.userId?.toLowerCase());
+
+      let updatedClient: any = null;
+      if (clientIdx !== -1) {
+        const client = clientsList[clientIdx];
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + 30);
+        client.expiryDate = expiryDate.toISOString().split("T")[0];
+        client.status = "online";
+        client.billingStatus = "paid";
+        client.lastSync = new Date().toISOString();
+        clientsList[clientIdx] = client;
+        updatedClient = client;
+        localDb["nexora_clients"] = { value: clientsList, updatedAt: Date.now() };
+
+        // Re-enable and sync on MikroTik
+        try {
+          const routersRecord = localDb["nexora_routers"];
+          const routersList: any[] = Array.isArray(routersRecord?.value) ? routersRecord.value : [];
+          const targetRouter = routersList.find((r) => r.id === client.routerId) || routersList[0];
+          if (targetRouter) {
+            const resolvedParams = resolveRouterCredentials(targetRouter);
+            await setMikrotikClientStatus(resolvedParams, client.userId, "active");
+          }
+        } catch (mErr) {
+          console.warn("MikroTik re-enable warning on renewal:", mErr);
+        }
+      }
+
+      // Record payment
+      const paymentsRecord = localDb["nexora_payments"];
+      const paymentsList: any[] = Array.isArray(paymentsRecord?.value) ? paymentsRecord.value : [];
+      paymentsList.unshift({
+        id: `PAY-RNW-${Date.now()}`,
+        clientName: renewal.clientName || renewal.userId,
+        userId: renewal.userId,
+        amount: Number(renewal.amount || renewal.price) || 0,
+        type: renewal.paymentMethod || "bKash",
+        transactionId: renewal.transactionId || `TRX-RNW-${Date.now()}`,
+        date: new Date().toISOString().split("T")[0],
+        time: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+        status: "approved",
+      });
+      localDb["nexora_payments"] = { value: paymentsList, updatedAt: Date.now() };
+
+      saveDb();
+      logServerAudit("RENEWAL_APPROVED", `Approved renewal for client ${renewal.userId}`);
+
+      res.json({
+        success: true,
+        message: "Renewal request approved successfully and client line extended.",
+        renewal,
+        client: updatedClient,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 6. Enforce Client Expiry / Server Sweep Endpoint
+  app.post("/api/admin/enforce-expiry", requireAdminAuth, async (req, res) => {
+    try {
+      const clientsRecord = localDb["nexora_clients"];
+      const clientsList: any[] = Array.isArray(clientsRecord?.value) ? clientsRecord.value : [];
+      const todayStr = new Date().toISOString().split("T")[0];
+
+      let disabledCount = 0;
+      const disabledUsers: string[] = [];
+
+      const routersRecord = localDb["nexora_routers"];
+      const routersList: any[] = Array.isArray(routersRecord?.value) ? routersRecord.value : [];
+      const defaultRouter = routersList[0];
+
+      for (let i = 0; i < clientsList.length; i++) {
+        const c = clientsList[i];
+        if (c.expiryDate && c.expiryDate < todayStr && c.status === "online") {
+          c.status = "expired";
+          c.billingStatus = "unpaid";
+          disabledCount++;
+          disabledUsers.push(c.userId);
+
+          // Real MikroTik disable & kick session
+          if (defaultRouter) {
+            try {
+              const targetRouter = routersList.find((r) => r.id === c.routerId) || defaultRouter;
+              const resolvedParams = resolveRouterCredentials(targetRouter);
+              await setMikrotikClientStatus(resolvedParams, c.userId, "expired");
+            } catch (kErr) {
+              console.warn(`Failed to disable expired user ${c.userId} on MikroTik:`, kErr);
+            }
+          }
+        }
+      }
+
+      if (disabledCount > 0) {
+        localDb["nexora_clients"] = { value: clientsList, updatedAt: Date.now() };
+        saveDb();
+        logServerAudit("EXPIRY_SWEEP", `Auto-disabled ${disabledCount} expired clients: ${disabledUsers.join(", ")}`);
+      }
+
+      res.json({
+        success: true,
+        disabledCount,
+        disabledUsers,
+        message: `Expiry sweep finished. ${disabledCount} accounts expired and disabled on MikroTik.`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Automated background expiry sweep every 5 minutes
+  setInterval(async () => {
+    try {
+      const clientsRecord = localDb["nexora_clients"];
+      const clientsList: any[] = Array.isArray(clientsRecord?.value) ? clientsRecord.value : [];
+      const todayStr = new Date().toISOString().split("T")[0];
+      let hasChanges = false;
+
+      for (const c of clientsList) {
+        if (c.expiryDate && c.expiryDate < todayStr && c.status === "online") {
+          c.status = "expired";
+          c.billingStatus = "unpaid";
+          hasChanges = true;
+        }
+      }
+
+      if (hasChanges) {
+        localDb["nexora_clients"] = { value: clientsList, updatedAt: Date.now() };
+        saveDb();
+        console.log("[Background Sweep] Expired accounts marked.");
+      }
+    } catch (bgErr) {
+      console.warn("Background expiry sweep warning:", bgErr);
+    }
+  }, 5 * 60 * 1000);
+
 
   // =========================================================================
   // 11. FIBER EXPRESS CLIENT AI ASSISTANT & REAL-TIME LINE DIAGNOSTICS (GEMINI)

@@ -1097,12 +1097,17 @@ export const generateMikrotikLoginHtml = (
         return;
       }
 
+      var cleanName = (clientNameValue || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      var baseName = cleanName.length > 0 ? cleanName : 'user';
+      var cleanPhone = phone.replace(/[^0-9]/g, '');
+      var generatedUsername = baseName + cleanPhone;
+
       var defaultClientName = clientNameValue || 'Hotspot Client ' + phone;
-      currentOrderPhone = phone;
+      currentOrderPhone = generatedUsername;
       currentOrderPass = pass;
 
       // Populate Success Summary Box
-      document.getElementById('successPhone').innerText = phone;
+      document.getElementById('successPhone').innerText = generatedUsername;
       document.getElementById('successPass').innerText = pass;
       document.getElementById('successPackage').innerText = selectedPackage ? (selectedPackage.name + ' (' + selectedPackage.speed + ')') : 'Hotspot Plan';
       document.getElementById('successTrx').innerText = trx.toUpperCase();
@@ -1126,7 +1131,7 @@ export const generateMikrotikLoginHtml = (
             speed: selectedPackage ? selectedPackage.speed : '25 Mbps',
             total: selectedPackage ? selectedPackage.price : 500,
             transaction: trx,
-            username: phone,
+            username: generatedUsername,
             password: pass,
             gateway: 'bKash/Nagad',
             photo: compressedPhotoData

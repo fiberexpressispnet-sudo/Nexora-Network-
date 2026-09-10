@@ -3,6 +3,7 @@ import { User, Lock, ChevronRight, ArrowLeft, Shield } from 'lucide-react';
 import { Client, AppSettings } from '../../types';
 import { db } from '../../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { setClientToken } from '../../lib/apiClient';
 
 interface ClientLoginScreenProps {
   onBack: () => void;
@@ -111,30 +112,39 @@ export const ClientLoginScreen: React.FC<ClientLoginScreenProps> = ({
     setLoading(true);
 
     try {
+      // 0. Primary Secure Path: Call Server-Side Client Authentication Endpoint
+      try {
+        const authRes = await fetch('/api/auth/client-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userId.trim(), password: password.trim() }),
+        });
+        const authData = await authRes.json();
+        if (authData.success && authData.client) {
+          if (authData.token) {
+            setClientToken(authData.token);
+          }
+          onLoginSuccess(authData.client);
+          return;
+        } else if (authData.message && !authRes.ok && authRes.status !== 404) {
+          setError(authData.message || 'Invalid credentials.');
+          return;
+        }
+      } catch (authErr) {
+        console.warn('Direct backend auth failed, trying client fallback', authErr);
+      }
+
       let allClients: Client[] = [];
       
-      // 0. Try local Express backend database
+      // 1. Try global workspace path
       try {
-        const res = await fetch('/api/db/get?key=nexora_clients');
-        const data = await res.json();
-        if (data.success && data.value && Array.isArray(data.value) && data.value.length > 0) {
-          allClients = data.value;
+        const workspaceRef = doc(db, 'ispWorkspace', 'mainData', 'collections', 'nexora_clients');
+        const workspaceSnap = await getDoc(workspaceRef);
+        if (workspaceSnap.exists() && workspaceSnap.data().value) {
+          allClients = workspaceSnap.data().value;
         }
       } catch (err) {
-        console.warn("Backend db/get call failed", err);
-      }
-      
-      // 1. Try global workspace path
-      if (allClients.length === 0) {
-        try {
-          const workspaceRef = doc(db, 'ispWorkspace', 'mainData', 'collections', 'nexora_clients');
-          const workspaceSnap = await getDoc(workspaceRef);
-          if (workspaceSnap.exists() && workspaceSnap.data().value) {
-            allClients = workspaceSnap.data().value;
-          }
-        } catch (err) {
-          console.warn("Global path failed", err);
-        }
+        console.warn("Global path failed", err);
       }
       
       // 2. Try user-specific path

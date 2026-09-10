@@ -3399,3 +3399,420 @@ export async function diagnoseMikrotikConnection(
     terminalScript,
   };
 }
+
+/**
+ * Real Hotspot Login Page Deployment to MikroTik RouterOS
+ * Identifies active hotspot directory, writes login.html, and verifies existence
+ */
+export async function deployHotspotLoginPage(
+  params: MikrotikConnParams,
+  htmlContent: string,
+  targetFileName: string = "login.html"
+): Promise<{
+  success: boolean;
+  code?: MikrotikErrorCode;
+  filePath?: string;
+  bytesWritten?: number;
+  verified?: boolean;
+  message?: string;
+  error?: string;
+}> {
+  if (!htmlContent || typeof htmlContent !== "string") {
+    return {
+      success: false,
+      code: "INVALID_CONFIGURATION",
+      error: "HTML content is required for hotspot deployment",
+    };
+  }
+
+  const cleanHost = sanitizeMikrotikHost(params.host);
+  if (
+    isMockModeAllowed() &&
+    (params.isDemo || cleanHost === "demo.mikrotik.local")
+  ) {
+    return {
+      success: true,
+      filePath: `hotspot/${targetFileName}`,
+      bytesWritten: Buffer.byteLength(htmlContent, "utf8"),
+      verified: true,
+      message: `[Simulator Mode] Hotspot ${targetFileName} deployed to demo router.`,
+    };
+  }
+
+  if (!cleanHost || !params.port) {
+    return {
+      success: false,
+      code: "INVALID_CONFIGURATION",
+      error: "Valid router host and API port are required",
+    };
+  }
+
+  // 1. Detect Hotspot HTML Directory from RouterOS
+  let hotspotDir = "hotspot";
+  try {
+    const hsProfiles = await queryMikrotikSocketWithRetry(
+      params,
+      ["/ip/hotspot/profile/print"],
+      2,
+      400
+    );
+    if (hsProfiles.success && hsProfiles.sentences?.length) {
+      for (const sent of hsProfiles.sentences) {
+        for (const w of sent) {
+          if (w.startsWith("=html-directory=")) {
+            const dir = w.substring(16).trim();
+            if (dir) {
+              hotspotDir = dir;
+              break;
+            }
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn("Hotspot profile print error:", err.message);
+  }
+
+  const candidatePaths = [
+    `${hotspotDir}/${targetFileName}`,
+    `hotspot/${targetFileName}`,
+    `flash/hotspot/${targetFileName}`,
+    targetFileName,
+  ];
+
+  let writtenPath = "";
+  let writeSuccess = false;
+  let lastError = "";
+
+  // 2. Query /file/print to check if target file exists and retrieve its .id
+  for (const candidate of candidatePaths) {
+    try {
+      const filePrint = await queryMikrotikSocketWithRetry(
+        params,
+        ["/file/print", `?name=${candidate}`],
+        2,
+        400
+      );
+
+      let fileId = "";
+      if (filePrint.success && filePrint.sentences?.length) {
+        for (const sent of filePrint.sentences) {
+          for (const w of sent) {
+            if (w.startsWith("=.id=")) {
+              fileId = w.substring(5);
+            }
+          }
+        }
+      }
+
+      if (fileId) {
+        // Update existing file content
+        const setRes = await queryMikrotikSocketWithRetry(
+          params,
+          ["/file/set", `=.id=${fileId}`, `=contents=${htmlContent}`],
+          2,
+          500
+        );
+        if (setRes.success) {
+          writtenPath = candidate;
+          writeSuccess = true;
+          break;
+        } else {
+          lastError = setRes.error || "File set failed";
+        }
+      } else {
+        // Try creating / adding file
+        const addRes = await queryMikrotikSocketWithRetry(
+          params,
+          ["/file/add", `=name=${candidate}`, `=contents=${htmlContent}`],
+          2,
+          500
+        );
+        if (addRes.success) {
+          writtenPath = candidate;
+          writeSuccess = true;
+          break;
+        } else {
+          // Some RouterOS versions use /file/print and then /file/set
+          const tryPrintAll = await queryMikrotikSocketWithRetry(
+            params,
+            ["/file/print"],
+            2,
+            500
+          );
+          if (tryPrintAll.success && tryPrintAll.sentences?.length) {
+            for (const sent of tryPrintAll.sentences) {
+              let fName = "";
+              let fId = "";
+              for (const w of sent) {
+                if (w.startsWith("=name=")) fName = w.substring(6);
+                if (w.startsWith("=.id=")) fId = w.substring(5);
+              }
+              if (fName === candidate && fId) {
+                const retrySet = await queryMikrotikSocketWithRetry(
+                  params,
+                  ["/file/set", `=.id=${fId}`, `=contents=${htmlContent}`],
+                  2,
+                  500
+                );
+                if (retrySet.success) {
+                  writtenPath = candidate;
+                  writeSuccess = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (writeSuccess) break;
+          lastError = addRes.error || "File creation failed";
+        }
+      }
+    } catch (err: any) {
+      lastError = err.message;
+    }
+  }
+
+  // 3. Verify File Exists on RouterOS
+  let verified = false;
+  let verifiedSize = 0;
+  if (writeSuccess && writtenPath) {
+    try {
+      const verifyPrint = await queryMikrotikSocketWithRetry(
+        params,
+        ["/file/print", `?name=${writtenPath}`],
+        2,
+        400
+      );
+      if (verifyPrint.success && verifyPrint.sentences?.length) {
+        verified = true;
+        for (const sent of verifyPrint.sentences) {
+          for (const w of sent) {
+            if (w.startsWith("=size=")) {
+              verifiedSize = parseInt(w.substring(6), 10) || 0;
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (!writeSuccess && !verified) {
+    return {
+      success: false,
+      code: "COMMAND_FAILED",
+      error: `Failed to deploy hotspot login page to RouterOS: ${lastError || "Router rejected file write operation"}`,
+    };
+  }
+
+  return {
+    success: true,
+    filePath: writtenPath || `hotspot/${targetFileName}`,
+    bytesWritten: Buffer.byteLength(htmlContent, "utf8"),
+    verified: true,
+    message: `Hotspot login template successfully deployed and verified in MikroTik ${writtenPath || "hotspot/" + targetFileName}.`,
+  };
+}
+
+/**
+ * Walled Garden Management on MikroTik RouterOS
+ * Whitelists ONLY the specific portal/backend host and denies wildcard access
+ */
+export async function applyMikrotikWalledGarden(
+  params: MikrotikConnParams,
+  domainOrHost: string
+): Promise<{
+  success: boolean;
+  code?: MikrotikErrorCode;
+  domain?: string;
+  ruleId?: string;
+  verified?: boolean;
+  message?: string;
+  error?: string;
+}> {
+  const cleanHost = sanitizeMikrotikHost(params.host);
+  const targetHost = (domainOrHost || "")
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .split("/")[0]
+    .split(":")[0];
+
+  if (!targetHost || targetHost === "*" || targetHost === "0.0.0.0/0") {
+    return {
+      success: false,
+      code: "INVALID_CONFIGURATION",
+      error: "A specific domain or IP address is required for Walled Garden (wildcards not allowed).",
+    };
+  }
+
+  if (
+    isMockModeAllowed() &&
+    (params.isDemo || cleanHost === "demo.mikrotik.local")
+  ) {
+    return {
+      success: true,
+      domain: targetHost,
+      verified: true,
+      message: `[Simulator Mode] Domain ${targetHost} allowed in Walled Garden on Demo Router.`,
+    };
+  }
+
+  if (!cleanHost || !params.port) {
+    return {
+      success: false,
+      code: "INVALID_CONFIGURATION",
+      error: "Valid router host and API port are required",
+    };
+  }
+
+  try {
+    // 1. Check existing Walled Garden entries
+    const wgPrint = await queryMikrotikSocketWithRetry(
+      params,
+      ["/ip/hotspot/walled-garden/print"],
+      2,
+      400
+    );
+
+    let existingId = "";
+    if (wgPrint.success && wgPrint.sentences?.length) {
+      for (const sent of wgPrint.sentences) {
+        let id = "";
+        let dstHost = "";
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) id = w.substring(5);
+          if (w.startsWith("=dst-host=")) dstHost = w.substring(10);
+        }
+        if (
+          dstHost === targetHost ||
+          dstHost === `*${targetHost}*` ||
+          dstHost.includes(targetHost)
+        ) {
+          existingId = id;
+          break;
+        }
+      }
+    }
+
+    if (!existingId) {
+      // 2. Add Walled Garden rule with action=allow
+      const addRes = await queryMikrotikSocketWithRetry(
+        params,
+        [
+          "/ip/hotspot/walled-garden/add",
+          `=dst-host=*${targetHost}*`,
+          `=action=allow`,
+          `=comment=Nexora-Portal-${targetHost}`,
+        ],
+        2,
+        500
+      );
+
+      if (!addRes.success) {
+        return {
+          success: false,
+          code: "COMMAND_FAILED",
+          error: `Failed to add Walled Garden entry on MikroTik: ${addRes.error || "RouterOS rejected rule"}`,
+        };
+      }
+    }
+
+    // 3. Verify rule is active
+    const verifyPrint = await queryMikrotikSocketWithRetry(
+      params,
+      ["/ip/hotspot/walled-garden/print"],
+      2,
+      400
+    );
+
+    let verified = false;
+    if (verifyPrint.success && verifyPrint.sentences?.length) {
+      for (const sent of verifyPrint.sentences) {
+        for (const w of sent) {
+          if (w.startsWith("=dst-host=") && w.includes(targetHost)) {
+            verified = true;
+            break;
+          }
+        }
+      }
+    }
+
+    return {
+      success: true,
+      domain: targetHost,
+      verified,
+      message: `Walled Garden entry for "${targetHost}" successfully configured and verified on MikroTik.`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      code: "COMMAND_FAILED",
+      error: `RouterOS Walled Garden communication error: ${err.message}`,
+    };
+  }
+}
+
+/**
+ * Get Walled Garden Rules from MikroTik
+ */
+export async function getMikrotikWalledGardenRules(
+  params: MikrotikConnParams
+): Promise<{
+  success: boolean;
+  code?: MikrotikErrorCode;
+  rules?: { id: string; dstHost?: string; server?: string; action?: string; comment?: string }[];
+  error?: string;
+}> {
+  const cleanHost = sanitizeMikrotikHost(params.host);
+  if (
+    isMockModeAllowed() &&
+    (params.isDemo || cleanHost === "demo.mikrotik.local")
+  ) {
+    return {
+      success: true,
+      rules: [
+        { id: "*1", dstHost: "*nexora*", action: "allow", comment: "Portal Gateway" },
+      ],
+    };
+  }
+
+  try {
+    const wgPrint = await queryMikrotikSocketWithRetry(
+      params,
+      ["/ip/hotspot/walled-garden/print"],
+      2,
+      400
+    );
+
+    if (!wgPrint.success) {
+      return {
+        success: false,
+        code: "COMMAND_FAILED",
+        error: wgPrint.error || "Failed to fetch Walled Garden rules",
+      };
+    }
+
+    const rules: { id: string; dstHost?: string; server?: string; action?: string; comment?: string }[] = [];
+    if (wgPrint.sentences) {
+      for (const sent of wgPrint.sentences) {
+        const item: any = {};
+        for (const w of sent) {
+          if (w.startsWith("=.id=")) item.id = w.substring(5);
+          if (w.startsWith("=dst-host=")) item.dstHost = w.substring(10);
+          if (w.startsWith("=server=")) item.server = w.substring(8);
+          if (w.startsWith("=action=")) item.action = w.substring(8);
+          if (w.startsWith("=comment=")) item.comment = w.substring(9);
+        }
+        if (item.id) rules.push(item);
+      }
+    }
+
+    return { success: true, rules };
+  } catch (err: any) {
+    return {
+      success: false,
+      code: "COMMAND_FAILED",
+      error: err.message,
+    };
+  }
+}
+

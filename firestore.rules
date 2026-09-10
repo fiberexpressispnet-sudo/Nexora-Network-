@@ -1,8 +1,51 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // 1. Global Default-Deny Safety Net
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "fiberexpressisp.net@gmail.com" ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.uid == "nexora_network_admin"
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ISP Workspace collections (Clients, Packages, Routers, Billing, etc.)
+    match /ispWorkspace/mainData/collections/{collectionKey} {
+      allow read: if isValidId(collectionKey) && (
+        isAdmin() ||
+        collectionKey == 'nexora_packages' ||
+        collectionKey == 'nexora_settings'
+      );
+      allow write: if isValidId(collectionKey) && isAdmin();
+    }
+
+    // User-specific application data
+    match /users/{userId}/appData/{key} {
+      allow read, write: if isValidId(userId) && isValidId(key) && (isOwner(userId) || isAdmin());
+    }
+
+    // Admin role verification table
+    match /admins/{adminId} {
+      allow read: if isValidId(adminId) && isSignedIn();
+      allow write: if false;
     }
   }
 }

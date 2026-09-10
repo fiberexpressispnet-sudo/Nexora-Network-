@@ -57,6 +57,7 @@ import { compressImage } from "../../lib/imageUtils";
 import { BandwidthMonitor } from "../BandwidthMonitor";
 import { LiveNetworkTraffic } from "../LiveNetworkTraffic";
 import { HotspotLoginTemplate } from "../HotspotLoginTemplate";
+import { getAdminHeaders } from "../../lib/apiClient";
 
 interface MikrotikManagementProps {
   routers: MikrotikRouter[];
@@ -254,7 +255,7 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
     try {
       const res = await fetch("/api/mikrotik/test-connection", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           host: targetRouter.ip,
           port: targetRouter.apiPort,
@@ -314,7 +315,7 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
     try {
       const res = await fetch("/api/mikrotik/reboot", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           router: currentRouter,
           host: currentRouter.ip,
@@ -538,7 +539,7 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
     try {
       const res = await fetch("/api/mikrotik/sync-client", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ router: currentRouter, client }),
         signal: controller.signal,
       });
@@ -587,7 +588,7 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
     try {
       const res = await fetch("/api/mikrotik/sync-all-clients", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ router: currentRouter, clients: routerClients }),
       });
       const data = await res.json();
@@ -634,7 +635,7 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
     try {
       const res = await fetch("/api/mikrotik/test-connection", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           host: routerFormIp.trim(),
           port: Number(routerFormPort) || 8728,
@@ -927,7 +928,7 @@ export const MikrotikManagementPage: React.FC<MikrotikManagementProps> = ({
     try {
       const res = await fetch("/api/mikrotik/ping", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           router: currentRouter,
           host: currentRouter.ip,
