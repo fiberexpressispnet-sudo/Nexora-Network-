@@ -1488,41 +1488,10 @@ export function MainApp({
     }
   };
 
-  // Helper to log payment automatically
-  const autoLogPayment = (
-    client: Client,
-    type: "New Client Activation" | "Broadband Renewal",
-  ) => {
-    const rawPrice =
-      client.price ||
-      packages.find((p) => p.name === client.package)?.price ||
-      "500";
-    const amount = parseInt(String(rawPrice).replace(/[^\d]/g, ""), 10) || 500;
-    if (amount <= 0) return;
-
-    const now = new Date();
-    const newPayment: PaymentRecord = {
-      id: `TXN-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      clientName: client.name,
-      userId: client.userId,
-      package: client.package,
-      amount: amount,
-      paymentMethod: "Cash",
-      transactionType: type,
-      collector: "Auto Billed",
-      timestamp: now.toLocaleString(),
-      dateKey: now.toISOString().slice(0, 10),
-      monthKey: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
-      status: "Completed",
-    };
-    setPayments((prev) => [newPayment, ...prev]);
-  };
-
   // Client CRUD
   const handleAddClient = (client: Client) => {
     setClients((prev) => [client, ...prev]);
     addAuditLog("Create Client", client.name);
-    autoLogPayment(client, "New Client Activation");
     syncClientToMikrotik(client);
   };
 
@@ -1585,6 +1554,8 @@ export function MainApp({
     months: number = 1,
     amount?: number,
     paymentMethod?: string,
+    transactionId?: string,
+    notes?: string,
   ) => {
     const targetClient = clients.find((c) => c.id === id);
     if (!targetClient) return;
@@ -1622,23 +1593,42 @@ export function MainApp({
 
     if (amount !== undefined && paymentMethod) {
       const nowTime = new Date();
-      const newPayment: PaymentRecord = {
-        id: `TXN-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-        clientName: targetClient.name,
-        userId: targetClient.userId,
-        package: targetClient.package,
-        amount: amount,
-        paymentMethod: paymentMethod as any,
-        transactionType: "Broadband Renewal",
-        collector: "Admin Portal",
-        timestamp: nowTime.toLocaleString(),
-        dateKey: nowTime.toISOString().slice(0, 10),
-        monthKey: `${nowTime.getFullYear()}-${String(nowTime.getMonth() + 1).padStart(2, "0")}`,
-        status: "Completed",
-      };
-      setPayments((prevP) => [newPayment, ...prevP]);
-    } else {
-      autoLogPayment(targetClient, "Broadband Renewal");
+      const dateStr = nowTime.toISOString().slice(0, 10);
+      const timeStr = nowTime.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+      const paymentId = transactionId
+        ? `TXN-${transactionId.replace(/[^a-zA-Z0-9_-]/g, "")}`
+        : `PAY-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      setPayments((prevP) => {
+        // Prevent duplicate payment records by Transaction ID or Payment ID
+        if (transactionId && prevP.some((p) => p.notes?.includes(transactionId) || p.id === paymentId)) {
+          return prevP;
+        }
+        if (prevP.some((p) => p.id === paymentId)) {
+          return prevP;
+        }
+
+        const newPayment: PaymentRecord = {
+          id: paymentId,
+          clientName: targetClient.name,
+          userId: targetClient.userId,
+          package: targetClient.package,
+          amount: amount,
+          paymentMethod: paymentMethod as any,
+          transactionType: "Broadband Renewal",
+          collector: "Admin Portal",
+          timestamp: `${dateStr} ${timeStr}`,
+          dateKey: dateStr,
+          monthKey: dateStr.slice(0, 7),
+          status: "Completed",
+          notes: notes || (transactionId ? `TrxID: ${transactionId}` : `Manual collection by Admin`),
+        };
+        return [newPayment, ...prevP];
+      });
     }
 
     setClients((prev) => prev.map((c) => (c.id === id ? updatedClient : c)));
@@ -1662,6 +1652,8 @@ export function MainApp({
       finalMonths,
       paymentData.amount,
       paymentData.paymentMethod,
+      paymentData.transactionId,
+      paymentData.notes,
     );
     showToast(
       `✅ Payment of ৳${paymentData.amount} recorded & subscriber renewed!`,

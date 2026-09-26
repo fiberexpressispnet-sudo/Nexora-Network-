@@ -102,8 +102,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
  const currentMonthKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
  const currentMonthRevenue = payments
- .filter((p) => p.monthKey === currentMonthKey)
- .reduce((sum, p) => sum + p.amount, 0);
+ .filter((p) => p && p.monthKey === currentMonthKey && p.status === 'Completed')
+ .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
  // Expiry statistics
  let expiringSoonCount = 0;
