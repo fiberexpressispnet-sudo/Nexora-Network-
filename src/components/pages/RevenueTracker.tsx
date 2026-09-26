@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import {
   DollarSign,
   TrendingUp,
+  TrendingDown,
   Calendar,
   BarChart2,
   Search,
@@ -27,7 +28,22 @@ import {
   Wallet,
   RotateCcw,
   Wifi,
+  LineChart as LineChartIcon,
+  Percent,
 } from "lucide-react";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  Area,
+  AreaChart,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ReferenceLine,
+} from "recharts";
 import { Client, Package, PaymentRecord, AppSettings } from "../../types";
 
 interface RevenueTrackerProps {
@@ -52,9 +68,12 @@ export const RevenueTrackerPage: React.FC<RevenueTrackerProps> = ({
   showToast,
   onHardReset,
 }) => {
-  const [activeTab, setActiveTab] = useState<"running" | "yearly" | "all_tx">(
+  const [activeTab, setActiveTab] = useState<"running" | "growth" | "yearly" | "all_tx">(
     "running",
   );
+  const [chartTimeframe, setChartTimeframe] = useState<"6m" | "12m" | "all">("12m");
+  const [chartMetric, setChartMetric] = useState<"both" | "revenue" | "transactions">("both");
+  const [curveType, setCurveType] = useState<"monotone" | "linear">("monotone");
   const [searchQuery, setSearchQuery] = useState("");
   const [methodFilter, setMethodFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -381,6 +400,130 @@ export const RevenueTrackerPage: React.FC<RevenueTrackerProps> = ({
     return max;
   }, [past12MonthsList]);
 
+  // --- RECHARTS MONTHLY REVENUE GROWTH DATA ---
+  const monthlyRevenueGrowthData = useMemo(() => {
+    const monthNamesShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthNamesFull = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+
+    const monthsCount = chartTimeframe === "6m" ? 6 : chartTimeframe === "12m" ? 12 : 24;
+    const map = new Map<string, { total: number; count: number; uniqueClients: Set<string> }>();
+
+    // Seed continuous months in ascending order
+    for (let i = monthsCount - 1; i >= 0; i--) {
+      const d = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      map.set(mKey, { total: 0, count: 0, uniqueClients: new Set() });
+    }
+
+    // Populate with real clean completed payments
+    cleanPayments.forEach((p) => {
+      const mKey = p.monthKey || (p.dateKey ? p.dateKey.slice(0, 7) : p.timestamp ? p.timestamp.slice(0, 7) : null);
+      if (!mKey || !/^\d{4}-\d{2}$/.test(mKey)) return;
+
+      if (chartTimeframe === "all" && !map.has(mKey)) {
+        map.set(mKey, { total: 0, count: 0, uniqueClients: new Set() });
+      }
+
+      if (map.has(mKey)) {
+        const entry = map.get(mKey)!;
+        entry.total += p.amount;
+        entry.count += 1;
+        if (p.userId || p.clientName) {
+          entry.uniqueClients.add(p.userId || p.clientName);
+        }
+      }
+    });
+
+    const sortedKeys = Array.from(map.keys()).sort();
+    let previousRevenue = 0;
+
+    return sortedKeys.map((mKey) => {
+      const entry = map.get(mKey) || { total: 0, count: 0, uniqueClients: new Set() };
+      const [yearStr, monthStr] = mKey.split("-");
+      const monthIdx = parseInt(monthStr, 10) - 1;
+      const year = parseInt(yearStr, 10);
+      const shortLabel = `${monthNamesShort[monthIdx]} '${String(year).slice(-2)}`;
+      const fullLabel = `${monthNamesFull[monthIdx]} ${year}`;
+
+      let growthRate = 0;
+      let growthAmount = 0;
+      if (previousRevenue > 0) {
+        growthAmount = entry.total - previousRevenue;
+        growthRate = Math.round(((entry.total - previousRevenue) / previousRevenue) * 1000) / 10;
+      } else if (entry.total > 0 && previousRevenue === 0) {
+        growthRate = 100;
+        growthAmount = entry.total;
+      }
+
+      previousRevenue = entry.total;
+
+      return {
+        monthKey: mKey,
+        label: shortLabel,
+        fullMonth: fullLabel,
+        revenue: entry.total,
+        transactions: entry.count,
+        subscribers: entry.uniqueClients.size,
+        growthRate,
+        growthAmount,
+      };
+    });
+  }, [cleanPayments, chartTimeframe, currentDate]);
+
+  // Overall Growth Stats
+  const growthStats = useMemo(() => {
+    if (monthlyRevenueGrowthData.length === 0) {
+      return {
+        latestRevenue: 0,
+        latestGrowthRate: 0,
+        avgRevenue: 0,
+        peakRevenue: 0,
+        peakMonth: "-",
+        totalPeriodRevenue: 0,
+        totalTransactions: 0,
+      };
+    }
+
+    const latest = monthlyRevenueGrowthData[monthlyRevenueGrowthData.length - 1];
+    const prev = monthlyRevenueGrowthData.length > 1 ? monthlyRevenueGrowthData[monthlyRevenueGrowthData.length - 2] : null;
+
+    let latestGrowthRate = 0;
+    if (prev && prev.revenue > 0) {
+      latestGrowthRate = Math.round(((latest.revenue - prev.revenue) / prev.revenue) * 1000) / 10;
+    } else if (latest.revenue > 0 && (!prev || prev.revenue === 0)) {
+      latestGrowthRate = 100;
+    }
+
+    let peakRevenue = 0;
+    let peakMonth = "-";
+    let sumRevenue = 0;
+    let sumTx = 0;
+
+    monthlyRevenueGrowthData.forEach((d) => {
+      sumRevenue += d.revenue;
+      sumTx += d.transactions;
+      if (d.revenue > peakRevenue) {
+        peakRevenue = d.revenue;
+        peakMonth = d.fullMonth;
+      }
+    });
+
+    const avgRevenue = Math.round(sumRevenue / monthlyRevenueGrowthData.length);
+
+    return {
+      latestRevenue: latest.revenue,
+      latestGrowthRate,
+      avgRevenue,
+      peakRevenue,
+      peakMonth,
+      totalPeriodRevenue: sumRevenue,
+      totalTransactions: sumTx,
+    };
+  }, [monthlyRevenueGrowthData]);
+
   // Archive Selected Month Computation
   const selectedArchiveMonthPayments = useMemo(() => {
     return cleanPayments.filter((p) => p.monthKey === selectedArchiveMonth);
@@ -588,6 +731,18 @@ export const RevenueTrackerPage: React.FC<RevenueTrackerProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab("growth")}
+            className={`px-4 py-2 rounded text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === "growth"
+                ? "bg-sky-500 text-white shadow-lg shadow-sky-500/25 ring-2 ring-sky-300/40"
+                : "bg-slate-50 text-slate-900 hover:bg-slate-200 hover:text-slate-800"
+            }`}
+          >
+            <LineChartIcon className="w-4 h-4 text-emerald-400" />
+            <span>📈 Monthly Revenue Growth</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab("yearly")}
             className={`px-4 py-2 rounded text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === "yearly"
@@ -612,6 +767,377 @@ export const RevenueTrackerPage: React.FC<RevenueTrackerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* ========================================================= */}
+      {/* TAB: MONTHLY REVENUE GROWTH (RECHARTS LINE CHART) */}
+      {/* ========================================================= */}
+      {activeTab === "growth" && (
+        <div className="space-y-6">
+          {/* Growth Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="bg-gradient-to-br from-emerald-900/40 via-slate-900/80 to-slate-950 border border-emerald-500/30 rounded p-5 shadow-lg space-y-1">
+              <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                Latest Month Collection
+              </span>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono">
+                ৳{growthStats.latestRevenue.toLocaleString()}
+              </div>
+              <span className="text-[11px] text-emerald-300 block font-semibold">
+                {monthlyRevenueGrowthData[monthlyRevenueGrowthData.length - 1]?.fullMonth || "Current Month"}
+              </span>
+            </div>
+
+            <div className="bg-gradient-to-br from-sky-900/40 via-slate-900/80 to-slate-950 border border-sky-500/30 rounded p-5 shadow-lg space-y-1">
+              <span className="text-xs font-bold text-sky-400 uppercase tracking-wider">
+                MoM Revenue Growth
+              </span>
+              <div className="text-2xl sm:text-3xl font-extrabold font-mono flex items-center gap-2">
+                <span className={growthStats.latestGrowthRate >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                  {growthStats.latestGrowthRate >= 0 ? "+" : ""}{growthStats.latestGrowthRate}%
+                </span>
+                {growthStats.latestGrowthRate >= 0 ? (
+                  <TrendingUp className="w-6 h-6 text-emerald-400" />
+                ) : (
+                  <TrendingDown className="w-6 h-6 text-rose-400" />
+                )}
+              </div>
+              <span className="text-[11px] text-slate-400 block font-semibold">
+                vs Previous Month Revenue
+              </span>
+            </div>
+
+            <div className="bg-gradient-to-br from-indigo-900/40 via-slate-900/80 to-slate-950 border border-indigo-500/30 rounded p-5 shadow-lg space-y-1">
+              <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
+                Monthly Average Run-Rate
+              </span>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono">
+                ৳{growthStats.avgRevenue.toLocaleString()}
+              </div>
+              <span className="text-[11px] text-indigo-300 block font-semibold">
+                Across {monthlyRevenueGrowthData.length} active months
+              </span>
+            </div>
+
+            <div className="bg-gradient-to-br from-amber-900/40 via-slate-900/80 to-slate-950 border border-amber-500/30 rounded p-5 shadow-lg space-y-1">
+              <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                Peak Monthly Record
+              </span>
+              <div className="text-2xl sm:text-3xl font-extrabold text-amber-300 font-mono">
+                ৳{growthStats.peakRevenue.toLocaleString()}
+              </div>
+              <span className="text-[11px] text-amber-300/80 block font-semibold truncate">
+                {growthStats.peakMonth}
+              </span>
+            </div>
+
+            <div className="bg-gradient-to-br from-purple-900/40 via-slate-900/80 to-slate-950 border border-purple-500/30 rounded p-5 shadow-lg space-y-1">
+              <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">
+                Period Total Collected
+              </span>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white font-mono">
+                ৳{growthStats.totalPeriodRevenue.toLocaleString()}
+              </div>
+              <span className="text-[11px] text-purple-300 block font-semibold">
+                {growthStats.totalTransactions} Verified Payments
+              </span>
+            </div>
+          </div>
+
+          {/* MAIN RECHARTS LINE CHART CARD */}
+          <div className="bg-white backdrop-blur-xl border border-slate-200 rounded p-5 sm:p-6 shadow-md space-y-5">
+            {/* Chart Header & Controls */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <LineChartIcon className="w-5 h-5 text-sky-500" />
+                  <span>Monthly Revenue Growth Trend (recharts)</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Visualizing verified completed payments collected per month with MoM velocity analysis.
+                </p>
+              </div>
+
+              {/* Toolbar Controls */}
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {/* Timeframe selector */}
+                <div className="flex items-center bg-slate-100 p-1 rounded border border-slate-200">
+                  <button
+                    onClick={() => setChartTimeframe("6m")}
+                    className={`px-2.5 py-1 rounded font-bold transition-all ${
+                      chartTimeframe === "6m" ? "bg-white text-sky-600 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    6 Months
+                  </button>
+                  <button
+                    onClick={() => setChartTimeframe("12m")}
+                    className={`px-2.5 py-1 rounded font-bold transition-all ${
+                      chartTimeframe === "12m" ? "bg-white text-sky-600 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    12 Months
+                  </button>
+                  <button
+                    onClick={() => setChartTimeframe("all")}
+                    className={`px-2.5 py-1 rounded font-bold transition-all ${
+                      chartTimeframe === "all" ? "bg-white text-sky-600 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    All History
+                  </button>
+                </div>
+
+                {/* Metric Selector */}
+                <div className="flex items-center bg-slate-100 p-1 rounded border border-slate-200">
+                  <button
+                    onClick={() => setChartMetric("both")}
+                    className={`px-2.5 py-1 rounded font-bold transition-all ${
+                      chartMetric === "both" ? "bg-white text-emerald-600 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Revenue &amp; Tx
+                  </button>
+                  <button
+                    onClick={() => setChartMetric("revenue")}
+                    className={`px-2.5 py-1 rounded font-bold transition-all ${
+                      chartMetric === "revenue" ? "bg-white text-emerald-600 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Revenue Only
+                  </button>
+                  <button
+                    onClick={() => setChartMetric("transactions")}
+                    className={`px-2.5 py-1 rounded font-bold transition-all ${
+                      chartMetric === "transactions" ? "bg-white text-emerald-600 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    Tx Count Only
+                  </button>
+                </div>
+
+                {/* Curve Smoothing */}
+                <button
+                  onClick={() => setCurveType((prev) => (prev === "monotone" ? "linear" : "monotone"))}
+                  className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded font-bold transition-colors"
+                  title="Toggle Curve Smoothing"
+                >
+                  {curveType === "monotone" ? "〰️ Smooth Curve" : "📐 Straight Line"}
+                </button>
+              </div>
+            </div>
+
+            {/* Recharts Container */}
+            <div className="w-full h-80 sm:h-96 pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={monthlyRevenueGrowthData}
+                  margin={{ top: 20, right: 30, left: 15, bottom: 15 }}
+                >
+                  <defs>
+                    <linearGradient id="revenueGrowthGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0284c7" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="#0284c7" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.7} />
+
+                  <XAxis
+                    dataKey="label"
+                    stroke="#64748b"
+                    tick={{ fill: "#334155", fontSize: 11, fontWeight: 700 }}
+                    tickLine={{ stroke: "#cbd5e1" }}
+                  />
+
+                  <YAxis
+                    yAxisId="left"
+                    stroke="#0284c7"
+                    tickFormatter={(val) => `৳${(val / 1000).toFixed(0)}k`}
+                    tick={{ fill: "#0369a1", fontSize: 11, fontWeight: 700 }}
+                    tickLine={{ stroke: "#cbd5e1" }}
+                  />
+
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    stroke="#10b981"
+                    tickFormatter={(val) => `${val}`}
+                    tick={{ fill: "#047857", fontSize: 11, fontWeight: 700 }}
+                    tickLine={{ stroke: "#cbd5e1" }}
+                    hide={chartMetric === "revenue"}
+                  />
+
+                  <Tooltip
+                    content={({ active, payload }: any) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-slate-900 border border-slate-700 rounded-lg p-3 shadow-2xl text-xs font-sans text-white space-y-1.5 min-w-[210px]">
+                            <div className="font-bold text-sm text-sky-400 border-b border-slate-700/80 pb-1 flex items-center justify-between">
+                              <span>{data.fullMonth}</span>
+                              <span className="text-[10px] text-slate-400 font-mono font-normal">
+                                {data.monthKey}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between pt-1">
+                              <span className="text-slate-400">Total Collected:</span>
+                              <span className="font-bold font-mono text-emerald-400 text-sm">
+                                ৳ {data.revenue.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400">MoM Growth:</span>
+                              <span
+                                className={`font-bold font-mono flex items-center gap-1 ${
+                                  data.growthRate >= 0 ? "text-emerald-400" : "text-rose-400"
+                                }`}
+                              >
+                                {data.growthRate >= 0 ? "+" : ""}
+                                {data.growthRate}%
+                                {data.growthRate >= 0 ? (
+                                  <TrendingUp className="w-3 h-3" />
+                                ) : (
+                                  <TrendingDown className="w-3 h-3" />
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400">Paid Transactions:</span>
+                              <span className="font-bold font-mono text-indigo-300">
+                                {data.transactions} tx
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400">Paid Subscribers:</span>
+                              <span className="font-bold font-mono text-amber-300">
+                                {data.subscribers} clients
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+
+                  <Legend
+                    wrapperStyle={{ paddingTop: "14px", fontSize: "12px", fontWeight: "700" }}
+                  />
+
+                  {growthStats.avgRevenue > 0 && (
+                    <ReferenceLine
+                      yAxisId="left"
+                      y={growthStats.avgRevenue}
+                      stroke="#f59e0b"
+                      strokeDasharray="4 4"
+                      label={{
+                        value: `Avg Run-Rate: ৳${Math.round(growthStats.avgRevenue / 1000)}k`,
+                        fill: "#d97706",
+                        fontSize: 11,
+                        fontWeight: "bold",
+                        position: "insideTopLeft",
+                      }}
+                    />
+                  )}
+
+                  {chartMetric !== "transactions" && (
+                    <Line
+                      yAxisId="left"
+                      type={curveType}
+                      dataKey="revenue"
+                      name="Monthly Payments Collected (BDT)"
+                      stroke="#0284c7"
+                      strokeWidth={3.5}
+                      dot={{ r: 5, fill: "#0284c7", stroke: "#ffffff", strokeWidth: 2 }}
+                      activeDot={{ r: 8, fill: "#0284c7", stroke: "#38bdf8", strokeWidth: 3 }}
+                    />
+                  )}
+
+                  {chartMetric !== "revenue" && (
+                    <Line
+                      yAxisId={chartMetric === "transactions" ? "left" : "right"}
+                      type={curveType}
+                      dataKey="transactions"
+                      name="Verified Transactions Count"
+                      stroke="#10b981"
+                      strokeWidth={2.5}
+                      strokeDasharray="4 4"
+                      dot={{ r: 4, fill: "#10b981", stroke: "#ffffff", strokeWidth: 2 }}
+                      activeDot={{ r: 7, fill: "#10b981" }}
+                    />
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Monthly Performance Breakdown Data Table */}
+            <div className="pt-4 border-t border-slate-200">
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">
+                Monthly Performance &amp; Growth Breakdown
+              </h4>
+              <div className="overflow-x-auto rounded border border-slate-200">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-bold uppercase text-[10px]">
+                      <th className="p-2.5 pl-3">Month</th>
+                      <th className="p-2.5">Gross Revenue</th>
+                      <th className="p-2.5">MoM Growth (%)</th>
+                      <th className="p-2.5">Growth Amount (BDT)</th>
+                      <th className="p-2.5">Transactions</th>
+                      <th className="p-2.5">Unique Clients</th>
+                      <th className="p-2.5 pr-3 text-right">Avg Ticket</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-sans">
+                    {monthlyRevenueGrowthData.slice().reverse().map((m) => (
+                      <tr key={m.monthKey} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-2.5 pl-3 font-bold text-slate-900">{m.fullMonth}</td>
+                        <td className="p-2.5 font-bold font-mono text-emerald-700">
+                          ৳{m.revenue.toLocaleString()}
+                        </td>
+                        <td className="p-2.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-full font-bold font-mono text-[11px] flex items-center gap-1 w-fit ${
+                              m.growthRate > 0
+                                ? "bg-emerald-100 text-emerald-800"
+                                : m.growthRate < 0
+                                ? "bg-rose-100 text-rose-800"
+                                : "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {m.growthRate > 0 ? "+" : ""}
+                            {m.growthRate}%
+                            {m.growthRate > 0 ? (
+                              <TrendingUp className="w-3 h-3" />
+                            ) : m.growthRate < 0 ? (
+                              <TrendingDown className="w-3 h-3" />
+                            ) : null}
+                          </span>
+                        </td>
+                        <td className="p-2.5 font-mono text-slate-700">
+                          {m.growthAmount !== 0 ? (
+                            <span className={m.growthAmount > 0 ? "text-emerald-700" : "text-rose-700"}>
+                              {m.growthAmount > 0 ? "+৳" : "-৳"}
+                              {Math.abs(m.growthAmount).toLocaleString()}
+                            </span>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td className="p-2.5 font-mono text-slate-700">{m.transactions} tx</td>
+                        <td className="p-2.5 font-mono text-slate-700">{m.subscribers}</td>
+                        <td className="p-2.5 pr-3 text-right font-mono text-slate-700">
+                          ৳{m.transactions ? Math.round(m.revenue / m.transactions).toLocaleString() : 0}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================= */}
       {/* TAB 1: RUNNING MONTH LIVE REVENUE & DAILY GRAPH */}
@@ -717,6 +1243,101 @@ export const RevenueTrackerPage: React.FC<RevenueTrackerProps> = ({
                   {peakDayRunningMonth.amount.toLocaleString()}
                 </span>
               </div>
+            </div>
+          </div>
+
+          {/* MONTHLY REVENUE GROWTH TREND PREVIEW (RECHARTS) */}
+          <div className="bg-white backdrop-blur-xl border border-slate-200 rounded p-5 sm:p-6 shadow-md space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <LineChartIcon className="w-5 h-5 text-sky-500" />
+                  <span>Monthly Revenue Growth Trend (recharts)</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Historical monthly collection trajectory &amp; MoM growth velocity.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold font-mono px-2.5 py-1 rounded bg-sky-50 text-sky-700 border border-sky-200">
+                  MoM Growth: {growthStats.latestGrowthRate >= 0 ? "+" : ""}{growthStats.latestGrowthRate}%
+                </span>
+                <button
+                  onClick={() => setActiveTab("growth")}
+                  className="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Detailed Analytics</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="w-full h-64 pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={monthlyRevenueGrowthData}
+                  margin={{ top: 15, right: 20, left: 10, bottom: 10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.6} />
+                  <XAxis
+                    dataKey="label"
+                    stroke="#64748b"
+                    tick={{ fill: "#334155", fontSize: 10, fontWeight: 700 }}
+                  />
+                  <YAxis
+                    stroke="#0284c7"
+                    tickFormatter={(val) => `৳${(val / 1000).toFixed(0)}k`}
+                    tick={{ fill: "#0369a1", fontSize: 10, fontWeight: 700 }}
+                  />
+                  <Tooltip
+                    content={({ active, payload }: any) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-slate-900 border border-slate-700 rounded-lg p-2.5 shadow-xl text-xs text-white space-y-1">
+                            <div className="font-bold text-sky-400 border-b border-slate-700 pb-1">
+                              {data.fullMonth}
+                            </div>
+                            <div className="text-emerald-400 font-bold font-mono">
+                              Revenue: ৳{data.revenue.toLocaleString()}
+                            </div>
+                            <div className="text-slate-300 font-mono text-[11px]">
+                              Growth: {data.growthRate >= 0 ? "+" : ""}{data.growthRate}%
+                            </div>
+                            <div className="text-indigo-300 font-mono text-[11px]">
+                              Transactions: {data.transactions}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  {growthStats.avgRevenue > 0 && (
+                    <ReferenceLine
+                      y={growthStats.avgRevenue}
+                      stroke="#f59e0b"
+                      strokeDasharray="3 3"
+                      label={{
+                        value: `Avg ৳${Math.round(growthStats.avgRevenue / 1000)}k`,
+                        fill: "#d97706",
+                        fontSize: 10,
+                        position: "insideTopLeft",
+                      }}
+                    />
+                  )}
+                  <Line
+                    type="monotone"
+                    dataKey="revenue"
+                    name="Payments Collected"
+                    stroke="#0284c7"
+                    strokeWidth={3}
+                    dot={{ r: 4, fill: "#0284c7", stroke: "#ffffff", strokeWidth: 2 }}
+                    activeDot={{ r: 6, fill: "#0284c7" }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
             </div>
           </div>
 

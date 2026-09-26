@@ -52,6 +52,7 @@ const pageTitles: Record<PageId, string> = {
  'mikrotik-configure': 'Mikrotik Server',
  'mikrotik-management': 'Mikrotik Management',
  'mikrotik-security': 'Mikrotik Security',
+ 'libreqos-integration': 'LibreQoS Traffic & QoE Engine',
  'network-diagram': 'Network Diagram',
  'support-ticketing': 'Support & Ticketing',
  purchase: 'Purchase & Procurement',

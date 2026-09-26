@@ -79,6 +79,7 @@ import { DaysProfilePage } from "./components/pages/DaysProfile";
 import { MikrotikConfigurePage } from "./components/pages/MikrotikConfigure";
 import { MikrotikManagementPage } from "./components/pages/MikrotikManagement";
 import { MikrotikSecurityPage } from "./components/pages/MikrotikSecurity";
+import { LibreQosManagement } from "./components/pages/LibreQosManagement";
 import { HotspotPage } from "./components/pages/Hotspot";
 import {
   HotspotConfigPage,
@@ -2686,6 +2687,17 @@ export function MainApp({
             {currentPage === "mikrotik-security" && (
               <MikrotikSecurityPage
                 routerConfig={routerConfig}
+                showToast={showToast}
+              />
+            )}
+
+            {currentPage === "libreqos-integration" && (
+              <LibreQosManagement
+                routers={routers}
+                clients={clients}
+                packages={packages}
+                bandwidthProfiles={bandwidthProfiles}
+                settings={settings}
                 showToast={showToast}
               />
             )}

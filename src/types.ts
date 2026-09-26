@@ -304,6 +304,7 @@ export type PageId =
   | "mikrotik-configure"
   | "mikrotik-management"
   | "mikrotik-security"
+  | "libreqos-integration"
   | "live-bandwidth"
   | "support-ticketing"
   | "support-tickets"
@@ -325,6 +326,86 @@ export type PageId =
   | "notifications"
   | "audit"
   | "settings";
+
+export interface LibreQosNode {
+  id: string;
+  name: string;
+  type: "Core" | "Tower" | "Sector_AP" | "OLT_PON" | "Switch" | "Site";
+  parentId: string | null;
+  capacityDownMbps: number;
+  capacityUpMbps: number;
+  location?: string;
+  ipSubnet?: string;
+  interfaceName?: string;
+  routerId?: string;
+  currentDownMbps?: number;
+  currentUpMbps?: number;
+  activeCircuits?: number;
+  bufferbloatGrade?: "A+" | "A" | "B" | "C" | "D" | "F";
+  avgRttMs?: number;
+}
+
+export interface LibreQosCircuit {
+  circuitId: string;
+  clientName: string;
+  ipAddress: string;
+  macAddress?: string;
+  downloadKbps: number;
+  uploadKbps: number;
+  cirDownKbps?: number;
+  cirUpKbps?: number;
+  nodeId: string;
+  parentNodeId?: string;
+  packageName: string;
+  priority: number;
+  cosClass: string;
+  cakeProfile: string;
+  overheadBytes: number;
+  wash: boolean;
+  ackFilter: boolean;
+  comment: string;
+  status: "Active" | "Suspended" | "Pending_Sync";
+  currentRttMs?: number;
+  packetLossPercent?: number;
+  qoeScore?: number;
+}
+
+export interface WanUplink {
+  id: string;
+  name: string;
+  interfaceName: string;
+  routerId: string;
+  capacityDownMbps: number;
+  capacityUpMbps: number;
+  currentDownMbps: number;
+  currentUpMbps: number;
+  targetPingHost: string;
+  currentRttMs: number;
+  packetLossPercent: number;
+  bufferbloatScore: "A+" | "A" | "B" | "C" | "D" | "F";
+  status: "Optimal" | "Congested" | "Degraded" | "Offline";
+  sqmEnabled: boolean;
+}
+
+export interface LibreQosConfig {
+  enabled: boolean;
+  serverHost: string;
+  serverPort: number;
+  apiToken: string;
+  syncMethod: "REST" | "SSH" | "LocalCSV" | "Webhook";
+  shapedDevicesPath: string;
+  networkJsonPath: string;
+  autoSyncIntervalMinutes: number;
+  lastSyncTime: string | null;
+  defaultCakeProfile: "diffserv4" | "diffserv8" | "besteffort" | "video_priority" | "gaming_priority";
+  overheadType: "ethernet_vlan" | "pppoe" | "raw_ethernet" | "docsis" | "custom";
+  overheadBytes: number;
+  washDscp: boolean;
+  ackFilter: boolean;
+  rttTargetMs: number;
+  autoThrottleBufferbloat: boolean;
+  autoOffloadMikrotikQueues: boolean;
+}
 
 export interface SupportTicket {
   id: string;
