@@ -210,13 +210,7 @@ function requireAdminAuth(req: express.Request, res: express.Response, next: exp
     });
   }
 
-  if (
-    token === ADMIN_SECRET ||
-    activeAdminTokens.has(token) ||
-    token.startsWith("adm_tok_") ||
-    token === "admin_secret_session" ||
-    token === "nexora_network_admin"
-  ) {
+  if ((ADMIN_SECRET && token === ADMIN_SECRET) || activeAdminTokens.has(token)) {
     return next();
   }
 
@@ -241,13 +235,7 @@ function requireClientOrAdminAuth(req: express.Request, res: express.Response, n
     return res.status(401).json({ success: false, error: "Authentication token required" });
   }
 
-  if (
-    token === ADMIN_SECRET ||
-    activeAdminTokens.has(token) ||
-    token.startsWith("adm_tok_") ||
-    token === "admin_secret_session" ||
-    token === "nexora_network_admin"
-  ) {
+  if ((ADMIN_SECRET && token === ADMIN_SECRET) || activeAdminTokens.has(token)) {
     (req as any).userRole = "admin";
     return next();
   }
@@ -306,15 +294,12 @@ async function startServer() {
   app.post("/api/auth/admin-login", rateLimiter(15, 60000), (req, res) => {
     const { pin, password } = req.body;
     const settingsRecord = localDb["nexora_settings"]?.value || {};
-    const configuredPin =
-      settingsRecord.pinCode || settingsRecord.pinPassword || settingsRecord.recoveryPin || "1234";
+    const configuredPin = settingsRecord.pinCode || settingsRecord.pinPassword || settingsRecord.recoveryPin || "";
 
     const entered = String(pin || password || "").trim();
     if (
-      entered === configuredPin ||
-      entered === ADMIN_SECRET ||
-      entered === "1234" ||
-      entered === "admin"
+      (ADMIN_SECRET && entered === ADMIN_SECRET) ||
+      (configuredPin && entered === configuredPin)
     ) {
       const sessionToken = `adm_tok_${crypto.randomBytes(24).toString("hex")}`;
       activeAdminTokens.add(sessionToken);
@@ -329,6 +314,10 @@ async function startServer() {
     const cleanPhone = String(phone || "").replace(/[^0-9]/g, "");
     const cleanPass = String(password || "").trim();
 
+    if (!cleanPass) {
+      return res.status(401).json({ success: false, error: "Password is required for client login" });
+    }
+
     const clientsRecord = localDb["nexora_clients"]?.value;
     const clientsList: any[] = Array.isArray(clientsRecord) ? clientsRecord : [];
 
@@ -336,16 +325,13 @@ async function startServer() {
       const uMatch = c.userId && String(c.userId).trim().toLowerCase() === cleanUser;
       const pMatch = c.phone && String(c.phone).replace(/[^0-9]/g, "") === cleanPhone;
       if (uMatch || (cleanPhone.length >= 10 && pMatch)) {
-        if (cleanPass && c.password) {
-          return String(c.password).trim() === cleanPass;
-        }
-        return true;
+        return c.password && String(c.password).trim() === cleanPass;
       }
       return false;
     });
 
     if (!matchedClient) {
-      return res.status(401).json({ success: false, error: "Client credentials not found" });
+      return res.status(401).json({ success: false, error: "Client credentials not found or incorrect password" });
     }
 
     const clientToken = `cli_tok_${crypto.randomBytes(24).toString("hex")}`;
@@ -368,11 +354,7 @@ async function startServer() {
     ) as string;
 
     if (!token) return res.json({ authenticated: false });
-    if (
-      token === ADMIN_SECRET ||
-      activeAdminTokens.has(token) ||
-      token.startsWith("adm_tok_")
-    ) {
+    if ((ADMIN_SECRET && token === ADMIN_SECRET) || activeAdminTokens.has(token)) {
       return res.json({ authenticated: true, role: "admin" });
     }
     const clientSess = activeClientSessions.get(token);
@@ -407,11 +389,11 @@ async function startServer() {
       req.query.token
     ) as string | undefined;
 
-    const isAdmin =
+    const isAdmin = Boolean(
       token &&
-      (token === ADMIN_SECRET ||
-        activeAdminTokens.has(token) ||
-        token.startsWith("adm_tok_"));
+      ((ADMIN_SECRET && token === ADMIN_SECRET) ||
+        activeAdminTokens.has(token))
+    );
 
     if (!isAdmin) {
       // Check if authenticated client requesting client data
@@ -2342,7 +2324,7 @@ async function startServer() {
     const existingPaymentTrx = paymentsList.find((p: any) => p.transactionId && p.transactionId.toUpperCase() === cleanTrx);
 
     if (existingIndex !== -1 || existingOrderTrx || existingPaymentTrx) {
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
         error: "Transaction ID already exists. Duplicate transaction is not allowed.",
       });
@@ -2516,7 +2498,7 @@ async function startServer() {
       const existingTrxPayment = checkPaymentsLst.find((p: any) => p.transactionId && p.transactionId.toUpperCase() === cleanTrx);
 
       if (existingTrxOrder || existingTrxPayment) {
-        return res.status(400).json({ success: false, error: "Transaction ID already exists. Duplicate transaction is not allowed." });
+        return res.status(409).json({ success: false, error: "Transaction ID already exists. Duplicate transaction is not allowed." });
       }
 
       // Verify package server-side strictly (no fallback to first package)
