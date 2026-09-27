@@ -27,10 +27,10 @@ export const PinLockSettingsModal: React.FC<PinLockSettingsModalProps> = ({
   onSavePinSettings,
   showToast,
 }) => {
-  const currentSavedPin = settings.pinCode || settings.pinPassword || '1234';
+  const currentSavedPin = settings.pinCode || settings.pinPassword || '';
 
   const [enabled, setEnabled] = useState<boolean>(settings.pinLockEnabled !== false);
-  const [recoveryPin, setRecoveryPin] = useState<string>(settings.recoveryPin || '1234');
+  const [recoveryPin, setRecoveryPin] = useState<string>(settings.recoveryPin || '');
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(settings.autoLockMinutes || 0);
 
   // Change PIN state
@@ -47,7 +47,7 @@ export const PinLockSettingsModal: React.FC<PinLockSettingsModalProps> = ({
     setPinChangeError(null);
 
     // Validate current PIN if one was already configured
-    if (currentSavedPin && currentPinInput !== currentSavedPin && currentPinInput !== '1234') {
+    if (currentSavedPin && currentPinInput !== currentSavedPin) {
       setPinChangeError('Current PIN is incorrect!');
       return;
     }

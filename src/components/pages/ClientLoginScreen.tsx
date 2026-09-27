@@ -160,20 +160,7 @@ export const ClientLoginScreen: React.FC<ClientLoginScreenProps> = ({
         }
       }
 
-      // 3. Try admin path
-      if (allClients.length === 0) {
-        try {
-          const fallbackRef = doc(db, 'users', 'nexora_network_admin', 'appData', 'nexora_clients');
-          const fallbackSnap = await getDoc(fallbackRef);
-          if (fallbackSnap.exists() && fallbackSnap.data().value) {
-            allClients = fallbackSnap.data().value;
-          }
-        } catch (err) {
-          console.warn("Admin path failed", err);
-        }
-      }
-
-      // 4. Try localStorage
+      // 3. Try localStorage
       if (allClients.length === 0) {
         const local = localStorage.getItem('nexora_clients');
         if (local) {

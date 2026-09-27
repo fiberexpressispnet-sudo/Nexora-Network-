@@ -2677,11 +2677,20 @@ async function startServer() {
 
       let createdClient: any;
       if (existingClientIdx !== -1) {
+        const existingC = clientsList[existingClientIdx];
         createdClient = {
-          ...clientsList[existingClientIdx],
+          ...existingC,
+          password: cleanPass || existingC.password,
+          connectionType: order.connectionType || existingC.connectionType || "PPPoE",
+          device: (order.connectionType === 'Hotspot' || order.connectionType === 'hotspot') ? 'Mobile' : (existingC.device || 'Router'),
+          ipAddress: order.ipAddress || existingC.ipAddress || "",
           status: "pending_approval",
-          package: order.packageName || clientsList[existingClientIdx].package,
-          bandwidth: order.bandwidth || clientsList[existingClientIdx].bandwidth,
+          package: order.packageName || existingC.package,
+          bandwidth: order.bandwidth || existingC.bandwidth,
+          downloadSpeed: order.downloadSpeed || order.bandwidth || existingC.downloadSpeed || existingC.bandwidth,
+          uploadSpeed: order.uploadSpeed || existingC.uploadSpeed || "10 Mbps",
+          price: order.price ? String(order.price) : existingC.price,
+          phone: cleanPhone || existingC.phone,
           billingStatus: "unpaid",
           expiryDate: expiryDateStr,
           expiry: expiryDateStr,
@@ -2700,6 +2709,7 @@ async function startServer() {
           downloadSpeed: order.downloadSpeed || order.bandwidth || "20 Mbps",
           uploadSpeed: order.uploadSpeed || "10 Mbps",
           monthlyFee: Number(order.price) || 800,
+          price: String(order.price || 800),
           balance: 0,
           billingStatus: "unpaid",
           status: "pending_approval",
@@ -2709,7 +2719,7 @@ async function startServer() {
           address: order.address || "Area Coverage",
           zone: "Main Zone",
           connectionType: order.connectionType || "PPPoE",
-          device: order.connectionType === 'Hotspot' ? 'Mobile' : 'Router',
+          device: (order.connectionType === 'Hotspot' || order.connectionType === 'hotspot') ? 'Mobile' : 'Router',
           ipAddress: order.ipAddress || "",
           lastSync: new Date().toISOString(),
           routerId: targetRouterId || order.targetRouterId,
@@ -2741,28 +2751,29 @@ async function startServer() {
           } else {
             // Execute the exact complete provisioning sequence as /api/mikrotik/sync-client
             const cleanProfile = String(createdClient.package || 'default').replace(/[^\w-]/g, '_') || 'default';
-            const isMobile = createdClient.device === 'Mobile' || createdClient.deviceType === 'Mobile' || createdClient.connectionType === 'hotspot' || createdClient.connectionType === 'Hotspot';
-            const sharedUsersLimit = isMobile ? '1' : '8';
+            const connTypeNormalized = String(createdClient.connectionType || order.connectionType || '').toLowerCase();
+            const devTypeNormalized = String(createdClient.device || createdClient.deviceType || order.device || order.deviceType || '').toLowerCase();
             
+            // STRICT MUTUAL EXCLUSION: Hotspot vs PPPoE
+            const isHotspot = connTypeNormalized === 'hotspot' || devTypeNormalized === 'mobile';
+            const isPppoe = !isHotspot;
+
+            const sharedUsersLimit = isHotspot ? '1' : '8';
             const dlRaw = String(createdClient.downloadSpeed || createdClient.bandwidth || '20').replace(/[^\d.]/g, '') || '20';
             const ulRaw = String(createdClient.uploadSpeed || '10').replace(/[^\d.]/g, '') || '10';
             const limitSpeed = `${ulRaw}M/${dlRaw}M`;
-            const isDisabled = false; // Must be enabled upon approval
 
-            const secretPassword = createdClient.password && String(createdClient.password).trim() !== '' ? String(createdClient.password).trim() : '123456';
+            const secretPassword = createdClient.password && String(createdClient.password).trim() !== '' ? String(createdClient.password).trim() : crypto.randomBytes(4).toString("hex");
             const expiryStr = createdClient.expiry || createdClient.expiryDate || 'No Expiry';
             const prioStr = String(createdClient.priority || '8');
             const clientComment = `FE | Exp: ${expiryStr} | Prio: ${prioStr} | ${createdClient.name || 'Client'} | ${createdClient.phone || ''}`.slice(0, 100);
-
-            const isPppoe = createdClient.connectionType === 'pppoe' || createdClient.connectionType === 'PPPoE' || createdClient.deviceType === 'Router' || createdClient.device === 'Router' || !createdClient.deviceType || !createdClient.connectionType;
-            const isHotspot = createdClient.connectionType === 'hotspot' || createdClient.connectionType === 'Hotspot' || createdClient.deviceType === 'Mobile' || createdClient.device === 'Mobile' || !createdClient.deviceType || !createdClient.connectionType;
 
             let pppoeSynced = !isPppoe;
             let hotspotSynced = !isHotspot;
             let pppoeError = '';
             let hotspotError = '';
 
-            // 1. PPPoE Secret Provisioning
+            // 1. PPPoE Secret Provisioning (Only run if isPppoe is true)
             if (isPppoe) {
               try {
                 const pppProfileRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/profile/print', `?name=${cleanProfile}`], 2, 800);
@@ -2785,9 +2796,15 @@ async function startServer() {
                 }
 
                 if (pppProfileExists && pppProfileId) {
-                  await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/profile/set', `=.id=${pppProfileId}`, `=rate-limit=${limitSpeed}`], 2, 800);
+                  const pSetRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/profile/set', `=.id=${pppProfileId}`, `=rate-limit=${limitSpeed}`], 2, 800);
+                  if (!pSetRes.success) {
+                    throw new Error(pSetRes.error || `Failed to update PPPoE profile "${cleanProfile}" on RouterOS`);
+                  }
                 } else {
-                  await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/profile/add', `=name=${cleanProfile}`, `=rate-limit=${limitSpeed}`, '=only-one=yes'], 2, 800);
+                  const pAddRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/profile/add', `=name=${cleanProfile}`, `=rate-limit=${limitSpeed}`, '=only-one=yes'], 2, 800);
+                  if (!pAddRes.success) {
+                    throw new Error(pAddRes.error || `Failed to create PPPoE profile "${cleanProfile}" on RouterOS`);
+                  }
                 }
 
                 const pppSecretRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/secret/print', `?name=${createdClient.userId}`], 2, 800);
@@ -2823,7 +2840,7 @@ async function startServer() {
               }
             }
 
-            // 2. Hotspot User Provisioning
+            // 2. Hotspot User Provisioning (Only run if isHotspot is true)
             if (isHotspot) {
               try {
                 const profilePrint = await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/profile/print', `?name=${cleanProfile}`], 2, 800);
@@ -2846,9 +2863,15 @@ async function startServer() {
                 }
 
                 if (profileExists && profileId) {
-                  await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/profile/set', `=.id=${profileId}`, `=shared-users=${sharedUsersLimit}`, `=rate-limit=${limitSpeed}`], 2, 800);
+                  const hSetRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/profile/set', `=.id=${profileId}`, `=shared-users=${sharedUsersLimit}`, `=rate-limit=${limitSpeed}`], 2, 800);
+                  if (!hSetRes.success) {
+                    throw new Error(hSetRes.error || `Failed to update Hotspot profile "${cleanProfile}" on RouterOS`);
+                  }
                 } else {
-                  await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/profile/add', `=name=${cleanProfile}`, `=shared-users=${sharedUsersLimit}`, `=rate-limit=${limitSpeed}`], 2, 800);
+                  const hAddRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/profile/add', `=name=${cleanProfile}`, `=shared-users=${sharedUsersLimit}`, `=rate-limit=${limitSpeed}`], 2, 800);
+                  if (!hAddRes.success) {
+                    throw new Error(hAddRes.error || `Failed to create Hotspot profile "${cleanProfile}" on RouterOS`);
+                  }
                 }
 
                 const printRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/print', `?name=${createdClient.userId}`], 2, 800);

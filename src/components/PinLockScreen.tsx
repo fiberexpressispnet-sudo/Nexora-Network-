@@ -25,11 +25,11 @@ export const PinLockScreen: React.FC<PinLockScreenProps> = ({
   onUnlock,
   onSaveSettings,
 }) => {
-  // Configured PIN from settings (defaults to '1234' if none provided)
-  const configuredPin = settings.pinCode || settings.pinPassword || settings.recoveryPin || '1234';
+  // Configured PIN from settings
+  const configuredPin = settings.pinCode || settings.pinPassword || settings.recoveryPin || '';
   const hasConfiguredPin = Boolean(settings.pinCode || settings.pinPassword);
 
-  const [isInitialSetup, setIsInitialSetup] = useState(!hasConfiguredPin && !settings.recoveryPin);
+  const [isInitialSetup, setIsInitialSetup] = useState(!hasConfiguredPin);
   const [setupStep, setSetupStep] = useState<'enter' | 'confirm'>('enter');
   const [tempSetupPin, setTempSetupPin] = useState<string>('');
 
@@ -45,7 +45,7 @@ export const PinLockScreen: React.FC<PinLockScreenProps> = ({
   const [recoveryInput, setRecoveryInput] = useState<string>('');
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
-  const recoveryPin = settings.recoveryPin || '1234';
+  const recoveryPin = settings.recoveryPin || settings.pinCode || settings.pinPassword || '';
 
   // Trigger shake animation on error
   const triggerShake = () => {

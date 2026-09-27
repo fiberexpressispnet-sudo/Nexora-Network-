@@ -2582,7 +2582,7 @@ export async function syncMikrotikClientQueue(
     isMockModeAllowed() &&
     (params.isDemo || cleanHost === "demo.mikrotik.local")
   ) {
-    const mockTarget = buildValidQueueTarget(client) || "192.168.88.100/32";
+    const mockTarget = buildValidQueueTarget(client) || "10.0.0.1/32";
     return {
       success: true,
       queueId: "*mock_q1",

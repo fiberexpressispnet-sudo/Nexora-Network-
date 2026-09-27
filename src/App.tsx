@@ -204,7 +204,7 @@ function usePersistentState<T>(
         console.warn(`Firestore save error for ${key}:`, err);
       });
 
-      if (uid && uid !== "nexora_network_admin") {
+      if (uid) {
         setDoc(doc(db, "users", uid, "appData", key), {
           value: sanitized,
           updatedAt: now,
