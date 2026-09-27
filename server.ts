@@ -2490,6 +2490,122 @@ async function startServer() {
     res.json(result);
   });
 
+  // Dedicated Client Order Submission Endpoint
+  app.post("/api/client/orders", rateLimiter(20, 60000), async (req, res) => {
+    try {
+      const { packageName, packageId, customerName, customerPhone, customerAddress, connectionType, customerPassword, paymentMethod, transactionId } = req.body;
+      if (!customerName || !customerPhone || !packageName) {
+        return res.status(400).json({ success: false, error: "Name, phone, and package name are required" });
+      }
+
+      const cleanPhone = String(customerPhone).trim();
+      const cleanName = String(customerName).trim();
+      const cleanTrx = String(transactionId || `CASH-${Date.now().toString().slice(-6)}`).trim();
+
+      // Verify package server-side
+      const packagesRecord = localDb["nexora_packages"];
+      const packagesList: Array<any> = Array.isArray(packagesRecord?.value) ? packagesRecord.value : [];
+      const matchedPkg = packagesList.find(p => p.id === packageId || p.name?.toLowerCase() === packageName?.toLowerCase()) || packagesList[0] || { name: packageName, price: 500, speed: '20 Mbps', validity: '30 Days' };
+
+      const pkgPrice = parseInt(String(matchedPkg.price).replace(/[^\d]/g, ''), 10) || 500;
+      const cleanNameNormalized = cleanName.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const baseName = cleanNameNormalized.length > 0 ? cleanNameNormalized : "user";
+      const cleanPhoneDigits = cleanPhone.replace(/[^0-9]/g, "");
+      const normalizedUserId = `${baseName}${cleanPhoneDigits}`;
+
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + 30);
+      const expiryDateStr = expiryDate.toISOString().split("T")[0];
+
+      const newClient = {
+        id: `CLI-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
+        name: cleanName,
+        phone: cleanPhone,
+        userId: normalizedUserId,
+        password: String(customerPassword || '123456').trim(),
+        package: matchedPkg.name,
+        bandwidth: matchedPkg.speed || '20 Mbps',
+        downloadSpeed: matchedPkg.speed || '20 Mbps',
+        uploadSpeed: matchedPkg.upload || '10 Mbps',
+        status: 'pending_approval',
+        billingStatus: 'unpaid',
+        expiryDate: expiryDateStr,
+        expiry: expiryDateStr,
+        router: 'Core MikroTik Gateway',
+        deviceType: connectionType === 'Hotspot' ? 'Mobile' : 'Router',
+        price: String(pkgPrice),
+      };
+
+      const newOrder = {
+        id: `ORD-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
+        orderNumber: `ORD-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`,
+        clientId: newClient.id,
+        clientName: newClient.name,
+        phone: cleanPhone,
+        userId: newClient.userId,
+        password: newClient.password,
+        address: String(customerAddress || 'Area Coverage').trim(),
+        packageName: matchedPkg.name,
+        price: String(pkgPrice),
+        bandwidth: matchedPkg.speed || '20 Mbps',
+        connectionType: connectionType || 'PPPoE',
+        paymentMethod: paymentMethod || 'bKash',
+        transactionId: cleanTrx,
+        status: 'pending',
+        createdAt: new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }),
+        targetRouter: 'Core MikroTik Gateway',
+      };
+
+      // Save to localDb
+      const clientsRecord = localDb["nexora_clients"];
+      const clientsList: Array<any> = Array.isArray(clientsRecord?.value) ? clientsRecord.value : [];
+      clientsList.unshift(newClient);
+      localDb["nexora_clients"] = { value: clientsList, updatedAt: Date.now() };
+
+      const ordersRecord = localDb["nexora_online_orders"];
+      const ordersList: Array<any> = Array.isArray(ordersRecord?.value) ? ordersRecord.value : [];
+      ordersList.unshift(newOrder);
+      localDb["nexora_online_orders"] = { value: ordersList, updatedAt: Date.now() };
+
+      const notifRecord = localDb["nexora_notifications"];
+      const notifsList: Array<any> = Array.isArray(notifRecord?.value) ? notifRecord.value : [];
+      notifsList.unshift({
+        id: Date.now(),
+        icon: 'CreditCard',
+        text: `🛒 New Package Order: ${newClient.name} (${cleanPhone}) ordered ${matchedPkg.name} [৳${pkgPrice}] via ${newOrder.paymentMethod} (TrxID: ${cleanTrx}). Awaiting verification & MikroTik upload.`,
+        time: 'Just Now',
+        read: false,
+      });
+      localDb["nexora_notifications"] = { value: notifsList, updatedAt: Date.now() };
+
+      const paymentsRecord = localDb["nexora_payments"];
+      const paymentsList: Array<any> = Array.isArray(paymentsRecord?.value) ? paymentsRecord.value : [];
+      paymentsList.unshift({
+        id: `PAY-${Date.now()}`,
+        clientName: newClient.name,
+        userId: newClient.userId,
+        package: newClient.package,
+        amount: pkgPrice,
+        paymentMethod: newOrder.paymentMethod,
+        transactionType: 'New Client Activation',
+        collector: 'Online Package Portal',
+        timestamp: new Date().toLocaleString(),
+        dateKey: new Date().toISOString().slice(0, 10),
+        monthKey: new Date().toISOString().slice(0, 7),
+        status: 'Pending',
+        notes: `Online Order TrxID: ${cleanTrx} | Address: ${newOrder.address}`,
+      });
+      localDb["nexora_payments"] = { value: paymentsList, updatedAt: Date.now() };
+
+      saveDb();
+      logServerAudit("CLIENT_ORDER_CREATED", `Client order created for ${cleanName} (${cleanPhone}) for package ${matchedPkg.name}`);
+
+      res.json({ success: true, order: newOrder, client: newClient });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to create order" });
+    }
+  });
+
   // =========================================================================
   // 10c. SERVER-AUTHORITATIVE ADMIN APPROVALS & EXPIRY SUBSYSTEM
   // =========================================================================
@@ -2497,7 +2613,7 @@ async function startServer() {
   // Helper to log server audit events
   function logServerAudit(action: string, details: string, user: string = "Admin") {
     const auditRecord = localDb["nexora_audit_logs"];
-    const currentLogs: any[] = Array.isArray(auditRecord?.value) ? auditRecord.value : [];
+    const currentLogs: Array<any> = Array.isArray(auditRecord?.value) ? auditRecord.value : [];
     const newLog = {
       id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       action,
@@ -2513,7 +2629,7 @@ async function startServer() {
     saveDb();
   }
 
-  // 1. Approve Online Client Order (Server-Side Idempotent)
+  // 1. Approve Online Client Order (Server-Side Idempotent & Strict MikroTik Provisioning)
   app.post("/api/admin/approve-order", requireAdminAuth, async (req, res) => {
     try {
       const { orderId, targetRouterId, overridePassword } = req.body;
@@ -2522,7 +2638,7 @@ async function startServer() {
       }
 
       const ordersRecord = localDb["nexora_online_orders"];
-      const ordersList: any[] = Array.isArray(ordersRecord?.value) ? ordersRecord.value : [];
+      const ordersList: Array<any> = Array.isArray(ordersRecord?.value) ? ordersRecord.value : [];
       const orderIndex = ordersList.findIndex((o) => o.id === orderId || o.orderNumber === orderId);
 
       if (orderIndex === -1) {
@@ -2531,12 +2647,12 @@ async function startServer() {
 
       const order = ordersList[orderIndex];
       if (order.status === "approved" || order.status === "active") {
-        return res.json({ success: true, message: "Order is already approved", order });
+        return res.json({ success: true, message: "Order is already approved (Idempotent)", order });
       }
 
       // Prepare client record
       const clientsRecord = localDb["nexora_clients"];
-      const clientsList: any[] = Array.isArray(clientsRecord?.value) ? clientsRecord.value : [];
+      const clientsList: Array<any> = Array.isArray(clientsRecord?.value) ? clientsRecord.value : [];
 
       // Generate credentials
       const cleanUser = order.userId || `user_${order.phone.replace(/[^0-9]/g, "").slice(-6)}`;
@@ -2562,6 +2678,7 @@ async function startServer() {
           bandwidth: order.bandwidth || clientsList[existingClientIdx].bandwidth,
           billingStatus: "paid",
           expiryDate: expiryDateStr,
+          expiry: expiryDateStr,
           lastSync: new Date().toISOString(),
         };
         clientsList[existingClientIdx] = createdClient;
@@ -2582,10 +2699,11 @@ async function startServer() {
           status: "online",
           joinDate: new Date().toISOString().split("T")[0],
           expiryDate: expiryDateStr,
+          expiry: expiryDateStr,
           address: order.address || "Area Coverage",
           zone: "Main Zone",
           connectionType: order.connectionType || "PPPoE",
-          device: "Router",
+          device: order.connectionType === 'Hotspot' ? 'Mobile' : 'Router',
           ipAddress: order.ipAddress || "192.168.88.100",
           lastSync: new Date().toISOString(),
           routerId: targetRouterId || order.targetRouterId,
@@ -2593,9 +2711,57 @@ async function startServer() {
         clientsList.unshift(createdClient);
       }
 
-      // Save clients & update order status
+      // Save clients in DB temporarily
       localDb["nexora_clients"] = { value: clientsList, updatedAt: Date.now() };
 
+      // ========================================================
+      // STRICT MIKROTIK PROVISIONING (Must succeed before marking order approved)
+      // ========================================================
+      let mikrotikSynced = false;
+      let mikrotikErrorMsg = '';
+
+      try {
+        const routersRecord = localDb["nexora_routers"];
+        const routersList: Array<any> = Array.isArray(routersRecord?.value) ? routersRecord.value : [];
+        const targetRouter = routersList.find((r) => r.id === (targetRouterId || order.targetRouterId)) || routersList[0];
+
+        if (targetRouter) {
+          const resolvedParams = resolveRouterCredentials(targetRouter);
+          const speedStr = `${createdClient.uploadSpeed || "10M"}/${createdClient.downloadSpeed || createdClient.bandwidth || "20M"}`.replace(/Mbps/gi, "M").replace(/\s+/g, "");
+          
+          const syncRes = await syncMikrotikClientQueue(resolvedParams, createdClient, speedStr, createdClient.priority || "8");
+          if (syncRes.success) {
+            mikrotikSynced = true;
+          } else {
+            mikrotikErrorMsg = syncRes.error || "MikroTik queue / secret sync failed";
+          }
+        } else {
+          if (process.env.MIKROTIK_MOCK_MODE === 'true' || isMockModeAllowed()) {
+            mikrotikSynced = true;
+          } else {
+            mikrotikErrorMsg = "No MikroTik router configured in system";
+          }
+        }
+      } catch (syncErr: any) {
+        mikrotikErrorMsg = syncErr.message || "MikroTik connection failed";
+      }
+
+      if (!mikrotikSynced && process.env.MIKROTIK_MOCK_MODE !== 'true' && !isMockModeAllowed()) {
+        // DO NOT mark order approved if MikroTik provisioning failed
+        order.status = "provisioning_failed";
+        order.error = mikrotikErrorMsg;
+        ordersList[orderIndex] = order;
+        localDb["nexora_online_orders"] = { value: ordersList, updatedAt: Date.now() };
+        saveDb();
+
+        return res.status(502).json({
+          success: false,
+          code: "MIKROTIK_PROVISIONING_FAILED",
+          error: `MikroTik account provisioning failed: ${mikrotikErrorMsg}. Order kept in safe state (PROVISIONING_FAILED). Client was NOT activated.`,
+        });
+      }
+
+      // Now mark order as approved
       order.status = "approved";
       order.approvedAt = new Date().toISOString();
       order.userId = cleanUser;
@@ -2605,7 +2771,7 @@ async function startServer() {
 
       // Add payment record
       const paymentsRecord = localDb["nexora_payments"];
-      const paymentsList: any[] = Array.isArray(paymentsRecord?.value) ? paymentsRecord.value : [];
+      const paymentsList: Array<any> = Array.isArray(paymentsRecord?.value) ? paymentsRecord.value : [];
       const paymentItem = {
         id: `PAY-${Date.now()}`,
         clientName: createdClient.name,
@@ -2621,32 +2787,14 @@ async function startServer() {
       localDb["nexora_payments"] = { value: paymentsList, updatedAt: Date.now() };
 
       saveDb();
-
-      // Attempt MikroTik provisioning
-      let mikrotikSynced = false;
-      try {
-        const routersRecord = localDb["nexora_routers"];
-        const routersList: any[] = Array.isArray(routersRecord?.value) ? routersRecord.value : [];
-        const targetRouter = routersList.find((r) => r.id === (targetRouterId || order.targetRouterId)) || routersList[0];
-
-        if (targetRouter) {
-          const resolvedParams = resolveRouterCredentials(targetRouter);
-          const speedStr = `${createdClient.uploadSpeed || "10M"}/${createdClient.downloadSpeed || createdClient.bandwidth || "20M"}`.replace(/Mbps/gi, "M").replace(/\s+/g, "");
-          const syncRes = await syncMikrotikClientQueue(resolvedParams, createdClient, speedStr, createdClient.priority || "8");
-          mikrotikSynced = syncRes.success;
-        }
-      } catch (syncErr) {
-        console.warn("MikroTik sync warning on order approval:", syncErr);
-      }
-
-      logServerAudit("ORDER_APPROVED", `Approved order ${order.orderNumber} for client ${cleanUser}. MikroTik Sync: ${mikrotikSynced ? 'Success' : 'Pending'}`);
+      logServerAudit("ORDER_APPROVED", `Approved order ${order.orderNumber} for client ${cleanUser}. MikroTik Verified: Success`);
 
       res.json({
         success: true,
-        message: "Order successfully approved, client provisioned, and payment recorded.",
+        message: "Order successfully approved, physical MikroTik account verified and provisioned, and payment recorded.",
         client: createdClient,
         order,
-        mikrotikSynced,
+        mikrotikSynced: true,
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });

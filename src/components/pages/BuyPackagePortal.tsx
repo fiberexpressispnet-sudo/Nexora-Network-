@@ -249,137 +249,42 @@ export const BuyPackagePortal: React.FC<BuyPackagePortalProps> = ({
 
     try {
       const cleanPhone = customerPhone.trim();
-      const expiryDate = calculateExpiryDate(selectedPackage.validity);
-      const pkgPrice = parseInt(String(selectedPackage.price).replace(/[^\d]/g, ''), 10) || 500;
       const finalTrxId = transactionId.trim() || `CASH-${Date.now().toString().slice(-6)}`;
 
-      // 1. Construct new client record (starts as pending_approval until Admin verifies payment and uploads to MikroTik)
-      const normalizedUserId = generateNormalizedUsername(customerName, cleanPhone);
-      const newClient: Client = {
-        id: `CLI-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
-        name: customerName.trim(),
-        phone: cleanPhone,
-        userId: normalizedUserId,
-        password: customerPassword.trim() || '123456',
-        package: selectedPackage.name,
-        bandwidth: selectedPackage.speed,
-        downloadSpeed: selectedPackage.speed,
-        uploadSpeed: selectedPackage.upload || '10 Mbps',
-        status: 'pending_approval',
-        expiry: expiryDate,
-        router: 'Core MikroTik Gateway',
-        deviceType: connectionType === 'Hotspot' ? 'Mobile' : 'Router',
-        price: String(pkgPrice),
-      };
+      const response = await fetch('/api/client/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          packageName: selectedPackage.name,
+          packageId: selectedPackage.id,
+          customerName: customerName.trim(),
+          customerPhone: cleanPhone,
+          customerAddress: customerAddress.trim(),
+          connectionType: connectionType,
+          customerPassword: customerPassword.trim() || '123456',
+          paymentMethod: paymentMethod,
+          transactionId: finalTrxId
+        })
+      });
 
-      // 2. Construct Online Package Purchase Order for Admin Review & Approval
-      const newOrder: OnlinePackageOrder = {
-        id: `ORD-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
-        orderNumber: `ORD-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`,
-        clientId: newClient.id,
-        clientName: newClient.name,
-        phone: cleanPhone,
-        userId: newClient.userId,
-        password: newClient.password,
-        address: customerAddress.trim(),
-        packageName: selectedPackage.name,
-        price: String(pkgPrice),
-        bandwidth: selectedPackage.speed,
-        connectionType: connectionType,
-        paymentMethod: paymentMethod,
-        transactionId: finalTrxId,
-        status: 'pending',
-        createdAt: new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }),
-        targetRouter: 'Core MikroTik Gateway',
-      };
-
-      // 3. Persist to localStorage 'nexora_clients'
-      let existingClients: Client[] = [];
-      try {
-        const local = localStorage.getItem('nexora_clients');
-        if (local) existingClients = JSON.parse(local);
-      } catch {}
-      const updatedClients = [newClient, ...existingClients];
-      localStorage.setItem('nexora_clients', JSON.stringify(updatedClients));
-
-      // 4. Persist to localStorage 'nexora_online_orders'
-      let existingOrders: OnlinePackageOrder[] = [];
-      try {
-        const localOrders = localStorage.getItem('nexora_online_orders');
-        if (localOrders) existingOrders = JSON.parse(localOrders);
-      } catch {}
-      const updatedOrders = [newOrder, ...existingOrders];
-      localStorage.setItem('nexora_online_orders', JSON.stringify(updatedOrders));
-
-      // 5. Create instant Admin Notification for New Order
-      let existingNotifs: NotificationItem[] = [];
-      try {
-        const localNotifs = localStorage.getItem('nexora_notifications');
-        if (localNotifs) existingNotifs = JSON.parse(localNotifs);
-      } catch {}
-
-      const orderNotification: NotificationItem = {
-        id: Date.now(),
-        icon: 'CreditCard',
-        text: `🛒 New Package Order: ${newClient.name} (${cleanPhone}) ordered ${selectedPackage.name} [৳${pkgPrice}] via ${paymentMethod} (TrxID: ${finalTrxId}). Awaiting verification & MikroTik upload.`,
-        time: 'Just Now',
-        read: false,
-      };
-      const updatedNotifs = [orderNotification, ...existingNotifs];
-      localStorage.setItem('nexora_notifications', JSON.stringify(updatedNotifs));
-
-      // 6. Record payment transaction in 'nexora_payments' with status Pending
-      const paymentRec: PaymentRecord = {
-        id: `PAY-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
-        clientName: newClient.name,
-        userId: newClient.userId,
-        package: newClient.package,
-        amount: pkgPrice,
-        paymentMethod: paymentMethod === 'Cash' ? 'Cash' : (paymentMethod as any),
-        transactionType: 'New Client Activation',
-        collector: 'Online Package Portal',
-        timestamp: new Date().toLocaleString(),
-        dateKey: new Date().toISOString().slice(0, 10),
-        monthKey: new Date().toISOString().slice(0, 7),
-        status: 'Pending',
-        notes: `Online Order TrxID: ${finalTrxId} | Address: ${customerAddress}`,
-      };
-
-      try {
-        let existingPayments: PaymentRecord[] = [];
-        const localPay = localStorage.getItem('nexora_payments');
-        if (localPay) existingPayments = JSON.parse(localPay);
-        const updatedPay = [paymentRec, ...existingPayments];
-        localStorage.setItem('nexora_payments', JSON.stringify(updatedPay));
-
-        // Save everything to backend Express database
-        await Promise.all([
-          fetch('/api/db/set', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: 'nexora_clients', value: updatedClients }),
-          }),
-          fetch('/api/db/set', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: 'nexora_online_orders', value: updatedOrders }),
-          }),
-          fetch('/api/db/set', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: 'nexora_notifications', value: updatedNotifs }),
-          }),
-          fetch('/api/db/set', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: 'nexora_payments', value: updatedPay }),
-          }),
-        ]);
-      } catch (err) {
-        console.warn('Syncing order data to backend error:', err);
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Order submission failed on server');
       }
 
-      // 7. Notify parent component
+      const newClient = data.client || {
+        id: `CLI-${Date.now()}`,
+        name: customerName.trim(),
+        phone: cleanPhone,
+        userId: generateNormalizedUsername(customerName, cleanPhone),
+        package: selectedPackage.name,
+        bandwidth: selectedPackage.speed,
+        status: 'pending_approval',
+        price: String(selectedPackage.price)
+      };
+
       if (onClientCreated) {
         onClientCreated(newClient);
       }
@@ -388,8 +293,8 @@ export const BuyPackagePortal: React.FC<BuyPackagePortalProps> = ({
       setCreatedClientResult(newClient);
       setCheckoutStep('success');
     } catch (err: any) {
-      console.error('Order provisioning failed:', err);
-      setFormError('অর্ডার সম্পন্ন করতে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
+      console.error('Order submission failed:', err);
+      setFormError(err.message || 'অর্ডার সম্পন্ন করতে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
     } finally {
       setIsSubmitting(false);
     }
