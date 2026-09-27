@@ -34,8 +34,9 @@ import {
   decryptSecret,
   maskOltSecrets,
   checkSocketReachability,
-  buildOltPonPorts,
-  buildOltOnus,
+  queryRealOltSystemDetails,
+  queryRealOltPonPorts,
+  queryRealOltOnus,
 } from "./src/server/oltApi";
 import {
   defaultLibreQosConfig,
@@ -4417,24 +4418,15 @@ ${clientContextText}
       const port = olt.managementPort || 161;
       const reachability = await checkSocketReachability(olt.ip, port, olt.timeoutMs || 4000);
 
-      const ponPorts = buildOltPonPorts(olt, reachability.reachable);
+      const systemDetails = await queryRealOltSystemDetails(olt, reachability.reachable);
+      const ponPorts = await queryRealOltPonPorts(olt, reachability.reachable);
 
       res.json({
         success: true,
         olt: maskOltSecrets([olt])[0],
         details: {
           status: reachability.reachable ? 'online' : 'offline',
-          system: {
-            cpuUsage: reachability.reachable ? 26 : null,
-            memoryUsage: reachability.reachable ? 44 : null,
-            temperature: reachability.reachable ? 45 : null,
-            uptime: reachability.reachable ? '38d 14h 22m' : null,
-            firmware: reachability.reachable ? 'v3.2.1-P4' : null,
-            hardwareVersion: reachability.reachable ? 'REV_B2' : null,
-            serialNumber: reachability.reachable ? `SN-${olt.brand.toUpperCase()}-${olt.ip.replace(/\./g, '')}` : null,
-            powerSupplyStatus: reachability.reachable ? 'Dual AC Power Dual Redundant OK' : 'N/A',
-            fanStatus: reachability.reachable ? 'Normal Speed (3 Fans Operational)' : 'N/A',
-          },
+          system: systemDetails,
           ponPorts,
         },
       });
@@ -4463,7 +4455,7 @@ ${clientContextText}
         if (!olt.enabled) continue;
         const port = olt.managementPort || 161;
         const reachability = await checkSocketReachability(olt.ip, port, 3000);
-        const oltOnus = buildOltOnus(olt, reachability.reachable, slotPort, mappings);
+        const oltOnus = await queryRealOltOnus(olt, reachability.reachable, slotPort, mappings);
         allOnus = allOnus.concat(oltOnus);
       }
 

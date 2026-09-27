@@ -117,71 +117,12 @@ export const OltManagement: React.FC<OltManagementProps> = ({
   const [targetOnuForMapping, setTargetOnuForMapping] = useState<ONUInfo | null>(null);
   const [selectedClientIdForMapping, setSelectedClientIdForMapping] = useState<string>('');
 
-  // Initial Sample OLTs if database is empty on first load
   const loadData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
     setIsRefreshing(true);
 
     try {
-      let fetchedOlts = await fetchOltListApi();
-
-      // Seed initial sample OLT configs if none exist in system yet
-      if (fetchedOlts.length === 0) {
-        const sampleOlts: OLTConfig[] = [
-          {
-            id: 'olt_main_huawei_01',
-            name: 'Core Optical OLT-01 (Huawei)',
-            brand: 'Huawei',
-            model: 'SmartAX MA5800-X7',
-            ip: '192.168.100.10',
-            managementPort: 161,
-            protocol: 'SNMPv2c',
-            username: 'admin',
-            snmpCommunityRead: 'public',
-            timeoutMs: 4000,
-            enabled: true,
-            status: 'online',
-            totalPonPorts: 8,
-            onlinePonPorts: 8,
-            cpuUsage: 26,
-            memoryUsage: 42,
-            temperature: 44,
-            uptime: '42d 12h',
-            firmware: 'V100R019C10',
-            serialNumber: '2102357890102001',
-            notes: 'Primary GPON Node serving Central Area',
-          },
-          {
-            id: 'olt_north_vsol_02',
-            name: 'North POP OLT-02 (VSOL)',
-            brand: 'VSOL',
-            model: 'V1600G1-BD GPON',
-            ip: '192.168.100.12',
-            managementPort: 161,
-            protocol: 'SNMPv2c',
-            username: 'admin',
-            snmpCommunityRead: 'public',
-            timeoutMs: 4000,
-            enabled: true,
-            status: 'online',
-            totalPonPorts: 8,
-            onlinePonPorts: 7,
-            cpuUsage: 18,
-            memoryUsage: 35,
-            temperature: 39,
-            uptime: '18d 04h',
-            firmware: 'v2.1.0-build2025',
-            serialNumber: 'VSOL1600G2025088',
-            notes: 'North Zone GPON Feeder',
-          },
-        ];
-
-        for (const sOlt of sampleOlts) {
-          await saveOltApi(sOlt);
-        }
-        fetchedOlts = await fetchOltListApi();
-      }
-
+      const fetchedOlts = await fetchOltListApi();
       setOlts(fetchedOlts);
 
       // Fetch ONUs
@@ -197,7 +138,7 @@ export const OltManagement: React.FC<OltManagementProps> = ({
       setLoading(false);
       setIsRefreshing(false);
     }
-  }, [showToast]);
+  }, []);
 
   useEffect(() => {
     loadData();
