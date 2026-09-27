@@ -85,7 +85,7 @@ function saveDb() {
 // SECURITY & ROUTER VAULT SUBSYSTEM (SERVER-AUTHORITATIVE)
 // =========================================================================
 const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY || "nexora_isp_master_secret_2026";
-const activeAdminTokens = new Set<string>(["admin_secret_session", "nexora_network_admin"]);
+const activeAdminTokens = new Set<string>();
 const activeClientSessions = new Map<string, { userId: string; phone: string; expiresAt: number }>();
 
 // In-Memory Server Router Vault (Never leaked to client browser)
@@ -371,9 +371,7 @@ async function startServer() {
     if (
       token === ADMIN_SECRET ||
       activeAdminTokens.has(token) ||
-      token.startsWith("adm_tok_") ||
-      token === "admin_secret_session" ||
-      token === "nexora_network_admin"
+      token.startsWith("adm_tok_")
     ) {
       return res.json({ authenticated: true, role: "admin" });
     }
@@ -413,9 +411,7 @@ async function startServer() {
       token &&
       (token === ADMIN_SECRET ||
         activeAdminTokens.has(token) ||
-        token.startsWith("adm_tok_") ||
-        token === "admin_secret_session" ||
-        token === "nexora_network_admin");
+        token.startsWith("adm_tok_"));
 
     if (!isAdmin) {
       // Check if authenticated client requesting client data
@@ -2517,12 +2513,16 @@ async function startServer() {
       expiryDate.setDate(expiryDate.getDate() + 30);
       const expiryDateStr = expiryDate.toISOString().split("T")[0];
 
+      const securePass = customerPassword && customerPassword.trim() !== '' && customerPassword.trim() !== '123456'
+        ? customerPassword.trim()
+        : crypto.randomBytes(4).toString('hex');
+
       const newClient = {
         id: `CLI-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
         name: cleanName,
         phone: cleanPhone,
         userId: normalizedUserId,
-        password: String(customerPassword || '123456').trim(),
+        password: securePass,
         package: matchedPkg.name,
         bandwidth: matchedPkg.speed || '20 Mbps',
         downloadSpeed: matchedPkg.speed || '20 Mbps',
@@ -2673,10 +2673,10 @@ async function startServer() {
       if (existingClientIdx !== -1) {
         createdClient = {
           ...clientsList[existingClientIdx],
-          status: "online",
+          status: "pending_approval",
           package: order.packageName || clientsList[existingClientIdx].package,
           bandwidth: order.bandwidth || clientsList[existingClientIdx].bandwidth,
-          billingStatus: "paid",
+          billingStatus: "unpaid",
           expiryDate: expiryDateStr,
           expiry: expiryDateStr,
           lastSync: new Date().toISOString(),
@@ -2695,8 +2695,8 @@ async function startServer() {
           uploadSpeed: order.uploadSpeed || "10 Mbps",
           monthlyFee: Number(order.price) || 800,
           balance: 0,
-          billingStatus: "paid",
-          status: "online",
+          billingStatus: "unpaid",
+          status: "pending_approval",
           joinDate: new Date().toISOString().split("T")[0],
           expiryDate: expiryDateStr,
           expiry: expiryDateStr,
@@ -2711,7 +2711,7 @@ async function startServer() {
         clientsList.unshift(createdClient);
       }
 
-      // Save clients in DB temporarily
+      // Save clients in DB as pending/unpaid while provisioning
       localDb["nexora_clients"] = { value: clientsList, updatedAt: Date.now() };
 
       // ========================================================
@@ -2917,7 +2917,16 @@ async function startServer() {
         });
       }
 
-      // Now mark order as approved
+      // Now mark client as online and paid, and order as approved
+      createdClient.status = "online";
+      createdClient.billingStatus = "paid";
+      if (existingClientIdx !== -1) {
+        clientsList[existingClientIdx] = createdClient;
+      } else {
+        clientsList[0] = createdClient;
+      }
+      localDb["nexora_clients"] = { value: clientsList, updatedAt: Date.now() };
+
       order.status = "approved";
       order.approvedAt = new Date().toISOString();
       order.userId = cleanUser;
