@@ -2710,7 +2710,7 @@ async function startServer() {
           zone: "Main Zone",
           connectionType: order.connectionType || "PPPoE",
           device: order.connectionType === 'Hotspot' ? 'Mobile' : 'Router',
-          ipAddress: order.ipAddress || "192.168.88.100",
+          ipAddress: order.ipAddress || "",
           lastSync: new Date().toISOString(),
           routerId: targetRouterId || order.targetRouterId,
         };

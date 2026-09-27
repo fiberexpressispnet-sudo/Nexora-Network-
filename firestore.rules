@@ -18,8 +18,7 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == "fiberexpressisp.net@gmail.com" ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        request.auth.uid == "nexora_network_admin"
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
 

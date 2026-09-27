@@ -11,7 +11,7 @@ export function getAdminToken(): string {
   return (
     localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) ||
     sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) ||
-    'admin_secret_session'
+    ''
   );
 }
 

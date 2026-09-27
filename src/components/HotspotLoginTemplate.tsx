@@ -715,13 +715,13 @@ export const generateMikrotikLoginHtml = (
               </span>
             </div>
             <div style="position: relative;">
-              <input type="text" id="clientPassword" class="form-control" value="123456" placeholder="পাসওয়ার্ড লিখুন" required style="padding-right: 86px; font-weight: 700; letter-spacing: 1px;">
+              <input type="text" id="clientPassword" class="form-control" value="" placeholder="অটো জেনারেটেড পাসওয়ার্ড" required style="padding-right: 86px; font-weight: 700; letter-spacing: 1px;">
               <button type="button" onclick="generateRandomPass()" style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: #334155; border: none; color: #7dd3fc; padding: 4px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; cursor: pointer;">
                 র‍্যান্ডম পিন ⟳
               </button>
             </div>
             <small style="display: block; margin-top: 4px; font-size: 11px; color: var(--text-muted);">
-              💡 ডিফল্ট পাসওয়ার্ড <strong>123456</strong> দেওয়া আছে। আপনি চাইলে কেটে দিয়ে আপনার পছন্দমতো পাসওয়ার্ড দিতে পারেন।
+              💡 একটি নিরাপদ পাসওয়ার্ড স্বয়ংক্রিয়ভাবে তৈরি হয়েছে। আপনি চাইলে পরিবর্তন করতে পারেন।
             </small>
           </div>
 
@@ -1078,7 +1078,7 @@ export const generateMikrotikLoginHtml = (
       var clientNameValue = nameEl ? nameEl.value.trim() : '';
       var phone = document.getElementById('clientPhone').value.trim();
       var passInput = document.getElementById('clientPassword');
-      var pass = (passInput && passInput.value.trim()) ? passInput.value.trim() : '123456';
+      var pass = (passInput && passInput.value.trim()) ? passInput.value.trim() : Math.floor(100000 + Math.random() * 900000).toString();
       var trx = document.getElementById('trxId').value.trim();
 
       if (!phone || phone.length < 11) {
@@ -1087,7 +1087,7 @@ export const generateMikrotikLoginHtml = (
         return;
       }
       if (!pass) {
-        alert('দয়া করে একটি পাসওয়ার্ড দিন অথবা ডিফল্ট 123456 ব্যবহার করুন');
+        alert('দয়া করে একটি পাসওয়ার্ড দিন');
         if (passInput) passInput.focus();
         return;
       }
@@ -1166,6 +1166,10 @@ export const generateMikrotikLoginHtml = (
     // Hide error block if template tags are not evaluated or empty
     window.onload = function() {
       renderPackages();
+      var passInput = document.getElementById('clientPassword');
+      if (passInput && !passInput.value) {
+        passInput.value = Math.floor(100000 + Math.random() * 900000).toString();
+      }
       var errBlock = document.getElementById('errorBlock');
       if (errBlock && (errBlock.innerText.indexOf('$(error)') !== -1 || !errBlock.innerText.trim())) {
         errBlock.style.display = 'none';

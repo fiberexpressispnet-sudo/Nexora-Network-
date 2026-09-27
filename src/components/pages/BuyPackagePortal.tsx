@@ -122,7 +122,7 @@ export const BuyPackagePortal: React.FC<BuyPackagePortalProps> = ({
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [connectionType, setConnectionType] = useState<'PPPoE' | 'Hotspot'>('PPPoE');
-  const [customerPassword, setCustomerPassword] = useState('123456');
+  const [customerPassword, setCustomerPassword] = useState(() => Math.floor(100000 + Math.random() * 900000).toString());
   const [paymentMethod, setPaymentMethod] = useState<'bKash' | 'Nagad' | 'Rocket' | 'Bank' | 'Cash'>('bKash');
   const [transactionId, setTransactionId] = useState('');
   const [formError, setFormError] = useState('');
