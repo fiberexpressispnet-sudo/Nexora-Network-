@@ -84,7 +84,7 @@ function saveDb() {
 // =========================================================================
 // SECURITY & ROUTER VAULT SUBSYSTEM (SERVER-AUTHORITATIVE)
 // =========================================================================
-const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY || "nexora_isp_master_secret_2026";
+const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY || process.env.ADMIN_SECRET || "";
 const activeAdminTokens = new Set<string>();
 const activeClientSessions = new Map<string, { userId: string; phone: string; expiresAt: number }>();
 
@@ -2315,7 +2315,9 @@ async function startServer() {
 
     const clientPhone = String(phone).trim();
     const cleanTrx = String(transaction).trim().toUpperCase();
-    const clientPass = String(password || "123456").trim();
+    const clientPass = password && String(password).trim() !== '' && String(password).trim() !== '123456' 
+      ? String(password).trim() 
+      : crypto.randomBytes(4).toString('hex');
 
     // Generate normalized username: normalizedName + phone (e.g. abdulrahim01712345678)
     const rawName = String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -2329,14 +2331,20 @@ async function startServer() {
     const nowTimestamp = Date.now();
     const timeFormatted = new Date().toLocaleString("en-US", { dateStyle: "short", timeStyle: "medium" });
 
-    // Check for existing duplicate transaction to prevent double purchase
+    // Check for existing duplicate transaction across hotspot purchases, online orders, and payments
     const existingIndex = hotspotPurchasesStore.findIndex((p) => p.transaction === cleanTrx);
-    if (existingIndex !== -1) {
-      return res.json({
-        success: true,
-        message: "Purchase request already recorded (idempotent).",
-        purchase: hotspotPurchasesStore[existingIndex],
-        duplicate: true,
+    const ordersRecord = localDb["nexora_online_orders"];
+    const ordersList = Array.isArray(ordersRecord?.value) ? ordersRecord.value : [];
+    const existingOrderTrx = ordersList.find((o: any) => o.transactionId && o.transactionId.toUpperCase() === cleanTrx);
+    
+    const paymentsRecord = localDb["nexora_payments"];
+    const paymentsList = Array.isArray(paymentsRecord?.value) ? paymentsRecord.value : [];
+    const existingPaymentTrx = paymentsList.find((p: any) => p.transactionId && p.transactionId.toUpperCase() === cleanTrx);
+
+    if (existingIndex !== -1 || existingOrderTrx || existingPaymentTrx) {
+      return res.status(400).json({
+        success: false,
+        error: "Transaction ID already exists. Duplicate transaction is not allowed.",
       });
     }
 
@@ -2490,18 +2498,34 @@ async function startServer() {
   app.post("/api/client/orders", rateLimiter(20, 60000), async (req, res) => {
     try {
       const { packageName, packageId, customerName, customerPhone, customerAddress, connectionType, customerPassword, paymentMethod, transactionId } = req.body;
-      if (!customerName || !customerPhone || !packageName) {
-        return res.status(400).json({ success: false, error: "Name, phone, and package name are required" });
+      if (!customerName || !customerPhone || !packageName || !transactionId) {
+        return res.status(400).json({ success: false, error: "Name, phone, package name, and transaction ID are required" });
       }
 
       const cleanPhone = String(customerPhone).trim();
       const cleanName = String(customerName).trim();
-      const cleanTrx = String(transactionId || `CASH-${Date.now().toString().slice(-6)}`).trim();
+      const cleanTrx = String(transactionId).trim().toUpperCase();
 
-      // Verify package server-side
+      // Check duplicate transaction ID across online orders and payments
+      const checkOrdersRec = localDb["nexora_online_orders"];
+      const checkOrdersLst: Array<any> = Array.isArray(checkOrdersRec?.value) ? checkOrdersRec.value : [];
+      const existingTrxOrder = checkOrdersLst.find((o: any) => o.transactionId && o.transactionId.toUpperCase() === cleanTrx);
+
+      const checkPaymentsRec = localDb["nexora_payments"];
+      const checkPaymentsLst: Array<any> = Array.isArray(checkPaymentsRec?.value) ? checkPaymentsRec.value : [];
+      const existingTrxPayment = checkPaymentsLst.find((p: any) => p.transactionId && p.transactionId.toUpperCase() === cleanTrx);
+
+      if (existingTrxOrder || existingTrxPayment) {
+        return res.status(400).json({ success: false, error: "Transaction ID already exists. Duplicate transaction is not allowed." });
+      }
+
+      // Verify package server-side strictly (no fallback to first package)
       const packagesRecord = localDb["nexora_packages"];
-      const packagesList: Array<any> = Array.isArray(packagesRecord?.value) ? packagesRecord.value : [];
-      const matchedPkg = packagesList.find(p => p.id === packageId || p.name?.toLowerCase() === packageName?.toLowerCase()) || packagesList[0] || { name: packageName, price: 500, speed: '20 Mbps', validity: '30 Days' };
+      const packagesList: Array<any> = Array.isArray(packagesRecord?.value) && packagesRecord.value.length > 0 ? packagesRecord.value : getAllLocalPackages();
+      const matchedPkg = packagesList.find(p => (packageId && String(p.id) === String(packageId)) || (packageName && p.name?.toLowerCase() === packageName?.toLowerCase()));
+      if (!matchedPkg) {
+        return res.status(400).json({ success: false, error: "Invalid packageId or package name provided. Fallback packages are not allowed." });
+      }
 
       const pkgPrice = parseInt(String(matchedPkg.price).replace(/[^\d]/g, ''), 10) || 500;
       const cleanNameNormalized = cleanName.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -2513,8 +2537,8 @@ async function startServer() {
       expiryDate.setDate(expiryDate.getDate() + 30);
       const expiryDateStr = expiryDate.toISOString().split("T")[0];
 
-      const securePass = customerPassword && customerPassword.trim() !== '' && customerPassword.trim() !== '123456'
-        ? customerPassword.trim()
+      const securePass = customerPassword && String(customerPassword).trim() !== '' && String(customerPassword).trim() !== '123456'
+        ? String(customerPassword).trim()
         : crypto.randomBytes(4).toString('hex');
 
       const newClient = {
@@ -3291,18 +3315,33 @@ async function startServer() {
       const todayStr = new Date().toISOString().split("T")[0];
       let hasChanges = false;
 
+      const routersRecord = localDb["nexora_routers"];
+      const routersList: any[] = Array.isArray(routersRecord?.value) ? routersRecord.value : [];
+      const defaultRouter = routersList[0];
+
       for (const c of clientsList) {
         if (c.expiryDate && c.expiryDate < todayStr && c.status === "online") {
           c.status = "expired";
           c.billingStatus = "unpaid";
           hasChanges = true;
+
+          // Disable real MikroTik account and kick active session
+          if (defaultRouter) {
+            try {
+              const targetRouter = routersList.find((r) => r.id === c.routerId) || defaultRouter;
+              const resolvedParams = resolveRouterCredentials(targetRouter);
+              await setMikrotikClientStatus(resolvedParams, c.userId, "expired");
+            } catch (bgMikErr) {
+              console.warn(`Background expiry sweep failed to disable user ${c.userId} on MikroTik:`, bgMikErr);
+            }
+          }
         }
       }
 
       if (hasChanges) {
         localDb["nexora_clients"] = { value: clientsList, updatedAt: Date.now() };
         saveDb();
-        console.log("[Background Sweep] Expired accounts marked.");
+        console.log("[Background Sweep] Expired accounts marked and real MikroTik accounts disabled.");
       }
     } catch (bgErr) {
       console.warn("Background expiry sweep warning:", bgErr);
