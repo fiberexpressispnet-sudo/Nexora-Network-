@@ -303,6 +303,7 @@ export type PageId =
   | "subscriptions"
   | "mikrotik-configure"
   | "mikrotik-management"
+  | "olt-management"
   | "mikrotik-security"
   | "libreqos-integration"
   | "live-bandwidth"

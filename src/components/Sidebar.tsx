@@ -60,6 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
  const networkMenuItems: { id: PageId; label: string; icon: React.ElementType }[] = [
  { id: 'mikrotik-management', label: 'MikroTik Management', icon: Server },
+ { id: 'olt-management', label: 'OLT & PON Operations', icon: Radio },
  { id: 'libreqos-integration', label: 'LibreQoS Traffic & QoE', icon: Zap },
  { id: 'live-bandwidth', label: 'Live Bandwidth Monitor', icon: Gauge },
  { id: 'network-map', label: 'Network & Fiber GIS Map', icon: Share2 },

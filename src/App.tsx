@@ -100,6 +100,7 @@ import { NetworkCoverageMap } from "./components/pages/NetworkCoverageMap";
 import { SecurityPage } from "./components/pages/SecurityPage";
 import { InvoicePrintPage } from "./components/pages/InvoicePrintPage";
 import { AdminProfilePage } from "./components/pages/AdminProfilePage";
+import { OltManagement } from "./components/pages/OltManagement";
 import { ClientLoginScreen } from "./components/pages/ClientLoginScreen";
 import { ClientDashboard } from "./components/pages/ClientDashboard";
 import { BuyPackagePortal } from "./components/pages/BuyPackagePortal";
@@ -2946,6 +2947,14 @@ export function MainApp({
                 adminProfile={adminProfile}
                 onSaveAdminProfile={setAdminProfile}
                 showToast={showToast}
+              />
+            )}
+
+            {currentPage === "olt-management" && (
+              <OltManagement
+                clients={clients}
+                showToast={showToast}
+                userRole="Admin"
               />
             )}
 

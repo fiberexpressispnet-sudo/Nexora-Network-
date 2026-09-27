@@ -51,6 +51,7 @@ const pageTitles: Record<PageId, string> = {
  'admin-profile': 'Admin Profile & Sessions',
  'mikrotik-configure': 'Mikrotik Server',
  'mikrotik-management': 'Mikrotik Management',
+ 'olt-management': 'OLT & PON Operations',
  'mikrotik-security': 'Mikrotik Security',
  'libreqos-integration': 'LibreQoS Traffic & QoE Engine',
  'network-diagram': 'Network Diagram',
