@@ -238,7 +238,7 @@ export async function queryRealOltSystemDetails(
       }
     }
 
-    // Power Supply OID Query (.1.3.6.1.4.1.2011.5.25.31.1.1.1.1.2 or .1.3.6.1.2.1.1)
+    // Power Supply OID Query (.1.3.6.1.4.1.2011.5.25.31.1.1.1.1.2)
     const pwrRes = await snmpGetReal(olt.ip, community, '1.3.6.1.4.1.2011.5.25.31.1.1.1.1.2', port, 1200);
     if (pwrRes.success && pwrRes.rawText) {
       powerSupplyStatus = pwrRes.rawText;
@@ -269,7 +269,7 @@ export async function queryRealOltSystemDetails(
 /**
  * Production-Ready Real PON Ports Walk
  * Walks SNMP ifTable / ifDescr / ifOperStatus for actual PON ports & throughput
- * Strictly returns [] if no PON ports are returned by SNMP. Does NOT invent fake fallback PON ports!
+ * Strictly returns Unknown/N/A for adminStatus & operStatus if SNMP query fails. Never defaults to "up".
  */
 export async function queryRealOltPonPorts(olt: OLTServerConfig, isReachable: boolean) {
   if (!isReachable) return [];
@@ -287,21 +287,25 @@ export async function queryRealOltPonPorts(olt: OLTServerConfig, isReachable: bo
       const lower = descr.toLowerCase();
 
       if (lower.includes('gpon') || lower.includes('epon') || lower.includes('pon') || lower.includes('ge')) {
-        let adminStatus: 'up' | 'down' = 'up';
-        let operStatus: 'up' | 'down' = 'up';
+        let adminStatus: string = 'Unknown/N/A';
+        let operStatus: string = 'Unknown/N/A';
         let rxBytes: number | null = null;
         let txBytes: number | null = null;
 
         if (r.oid) {
           const ifIdx = r.oid.split('.').pop();
 
-          // Query ifAdminStatus
+          // Query ifAdminStatus (.1.3.6.1.2.1.2.2.1.7)
           const adminRes = await snmpGetReal(olt.ip, community, `1.3.6.1.2.1.2.2.1.7.${ifIdx}`, port, 1000);
-          if (adminRes.success && adminRes.value === 2) adminStatus = 'down';
+          if (adminRes.success && adminRes.value !== undefined) {
+            adminStatus = adminRes.value === 1 ? 'up' : adminRes.value === 2 ? 'down' : 'Unknown/N/A';
+          }
 
-          // Query ifOperStatus
+          // Query ifOperStatus (.1.3.6.1.2.1.2.2.1.8)
           const operRes = await snmpGetReal(olt.ip, community, `1.3.6.1.2.1.2.2.1.8.${ifIdx}`, port, 1000);
-          if (operRes.success && operRes.value === 2) operStatus = 'down';
+          if (operRes.success && operRes.value !== undefined) {
+            operStatus = operRes.value === 1 ? 'up' : operRes.value === 2 ? 'down' : 'Unknown/N/A';
+          }
 
           // Query ifInOctets (RX) & ifOutOctets (TX)
           const inRes = await snmpGetReal(olt.ip, community, `1.3.6.1.2.1.2.2.1.10.${ifIdx}`, port, 1000);
@@ -348,7 +352,7 @@ export async function queryRealOltPonPorts(olt: OLTServerConfig, isReachable: bo
  * Production-Ready Real ONU Discovery Engine
  * Correlates exact SNMP WALK table indices across Serial, RX, TX, Status, Distance, Temperature & Voltage.
  * Returns ONLY real discovered ONUs or EMPTY ARRAY ([]) if 0 ONUs exist on the OLT.
- * Strictly avoids any hardcoded or fake strings ("3.3", "42", "2.1", "Real-time", "0/1:x").
+ * Strictly avoids any hardcoded or fake credentials or default passwords.
  */
 export async function queryRealOltOnus(
   olt: OLTServerConfig,
@@ -402,7 +406,7 @@ export async function queryRealOltOnus(
       const snStr = String(item.rawText || item.value || '').trim();
       if (!snStr || snStr.length < 6) continue;
 
-      // Extract exact OID index suffix (e.g. "4194304000.1") to correlate across MIB tables
+      // Extract exact OID index suffix (e.g. "4194304000.1")
       const cleanOid = item.oid ? item.oid.replace(/^\./, '') : '';
       const cleanRoot = snOidRoot.replace(/^\./, '');
       const indexSuffix = cleanOid.startsWith(cleanRoot) ? cleanOid.slice(cleanRoot.length + 1) : '';
@@ -464,7 +468,7 @@ export async function queryRealOltOnus(
         const voltRes = await snmpGetReal(olt.ip, community, `${voltOidRoot}.${indexSuffix}`, port, 1200);
         if (voltRes.success && typeof voltRes.value === 'number' && voltRes.value > 0) {
           let vVal = voltRes.value;
-          if (vVal > 100) vVal = vVal / 1000; // mV to V
+          if (vVal > 100) vVal = vVal / 1000;
           volt = parseFloat(vVal.toFixed(1));
         }
 
@@ -505,7 +509,7 @@ export async function queryRealOltOnus(
         temperature: temp,
         voltage: volt,
         distanceMeters: distance,
-        uptime: null, // Strictly null unless returned by SNMP
+        uptime: null,
         lastOnline: status === 'online' ? 'Active' : 'Offline',
         lastOffline: status !== 'online' ? 'Offline' : null,
         losStatus: status === 'los',
@@ -520,33 +524,38 @@ export async function queryRealOltOnus(
     console.warn(`SNMP ONU Walk Error for OLT ${olt.ip}:`, err);
   }
 
-  // Step C: Fallback to Telnet CLI if SNMP returns 0 ONUs
+  // Step C: Fallback to Telnet CLI ONLY if valid configured credentials exist and SNMP returns 0 ONUs
   if (discoveredOnus.length === 0) {
-    try {
-      const cliRes = await queryOltTelnetCli(
-        olt.ip,
-        23,
-        olt.username || 'admin',
-        olt.passwordEncrypted ? decryptSecret(olt.passwordEncrypted) : 'admin',
-        olt.brand,
-        3500
-      );
+    const cliUser = olt.username ? String(olt.username).trim() : '';
+    const cliPass = olt.passwordEncrypted ? decryptSecret(olt.passwordEncrypted) : '';
 
-      if (cliRes.success && cliRes.onus.length > 0) {
-        for (const cOnu of cliRes.onus) {
-          const mapping = mappings.find((m) => m.serialNumber === cOnu.serialNumber);
-          discoveredOnus.push({
-            ...cOnu,
-            oltId: olt.id,
-            oltName: olt.name,
-            mappedClientId: mapping?.clientId || null,
-            mappedClientName: mapping?.clientName || null,
-            mappedUserId: mapping?.userId || null,
-          });
+    if (cliUser && cliPass) {
+      try {
+        const cliRes = await queryOltTelnetCli(
+          olt.ip,
+          23,
+          cliUser,
+          cliPass,
+          olt.brand,
+          3500
+        );
+
+        if (cliRes.success && cliRes.onus.length > 0) {
+          for (const cOnu of cliRes.onus) {
+            const mapping = mappings.find((m) => m.serialNumber === cOnu.serialNumber);
+            discoveredOnus.push({
+              ...cOnu,
+              oltId: olt.id,
+              oltName: olt.name,
+              mappedClientId: mapping?.clientId || null,
+              mappedClientName: mapping?.clientName || null,
+              mappedUserId: mapping?.userId || null,
+            });
+          }
         }
+      } catch (cliErr) {
+        console.warn(`Telnet CLI fallback warning for OLT ${olt.ip}:`, cliErr);
       }
-    } catch (cliErr) {
-      console.warn(`Telnet CLI fallback warning for OLT ${olt.ip}:`, cliErr);
     }
   }
 

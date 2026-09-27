@@ -22,15 +22,25 @@ export interface CliOnuRecord {
 
 /**
  * Connects to OLT via Telnet Socket (Port 23) and executes CLI commands
+ * Strictly requires valid configured credentials. Returns secure error if missing.
  */
 export function queryOltTelnetCli(
   host: string,
   port = 23,
-  user = 'admin',
-  pass = 'admin',
+  user = '',
+  pass = '',
   brand = 'Huawei',
   timeoutMs = 5000
 ): Promise<{ success: boolean; rawOutput: string; onus: CliOnuRecord[]; error?: string }> {
+  if (!user || !pass) {
+    return Promise.resolve({
+      success: false,
+      rawOutput: '',
+      onus: [],
+      error: 'Valid configured credentials required for Telnet CLI connection.',
+    });
+  }
+
   return new Promise((resolve) => {
     const socket = new net.Socket();
     let rawOutput = '';
@@ -221,9 +231,9 @@ export function parseOltCliOutput(raw: string, brand: string): CliOnuRecord[] {
       rxPower,
       txPower,
       temperature,
-      voltage: null, // Strictly null unless returned by CLI
+      voltage: null,
       distanceMeters,
-      uptime: null, // Strictly null unless returned by CLI
+      uptime: null,
       trafficRxMbps: null,
       trafficTxMbps: null,
     });

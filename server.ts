@@ -4364,15 +4364,15 @@ ${clientContextText}
         ip: String(oltData.ip).trim(),
         managementPort: Number(oltData.managementPort) || 161,
         protocol: oltData.protocol || 'SNMPv2c',
-        username: oltData.username || 'admin',
+        username: oltData.username ? String(oltData.username).trim() : '',
         passwordEncrypted: passwordEnc,
-        snmpCommunityRead: oltData.snmpCommunityRead || 'public',
+        snmpCommunityRead: oltData.snmpCommunityRead ? String(oltData.snmpCommunityRead).trim() : 'public',
         snmpCommunityWrite: oltData.snmpCommunityWrite ? encryptSecret(oltData.snmpCommunityWrite) : undefined,
         timeoutMs: Number(oltData.timeoutMs) || 5000,
         enabled: oltData.enabled !== false,
         status: 'online',
         lastSync: new Date().toISOString(),
-        totalPonPorts: Number(oltData.totalPonPorts) || (oltData.brand === 'BDCOM' ? 4 : 8),
+        totalPonPorts: Number(oltData.totalPonPorts) || 0,
         notes: oltData.notes || '',
       };
 

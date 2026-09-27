@@ -48,7 +48,7 @@ export class ZTEAdapter extends OLTAdapter {
             firmware: data.systemInfo?.firmware || null,
             hardwareVersion: data.systemInfo?.hardwareVersion || null,
             uptime: data.systemInfo?.uptime || null,
-            totalPonPorts: data.systemInfo?.totalPonPorts || 8,
+            totalPonPorts: data.systemInfo?.totalPonPorts ?? null,
             cpuUsage: data.systemInfo?.cpuUsage ?? null,
             memoryUsage: data.systemInfo?.memoryUsage ?? null,
             temperature: data.systemInfo?.temperature ?? null,
