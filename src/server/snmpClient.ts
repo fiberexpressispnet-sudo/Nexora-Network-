@@ -56,9 +56,9 @@ export function decodeOid(buffer: Buffer, offset = 0, length?: number): string {
 }
 
 /**
- * Builds SNMP v2c GET Request Packet
+ * Builds SNMP Request Packet (pduType 0xA0 for GET, 0xA1 for GETNEXT)
  */
-export function buildSnmpGetPacket(community: string, oidStr: string, requestId = 1001): Buffer {
+export function buildSnmpPacket(community: string, oidStr: string, pduType = 0xa0, requestId = 1001): Buffer {
   const communityBuf = Buffer.from(community, 'utf8');
   const oidBuf = encodeOid(oidStr);
 
@@ -86,10 +86,10 @@ export function buildSnmpGetPacket(community: string, oidStr: string, requestId 
   // Error Index (INTEGER 0)
   const errIdxBuf = Buffer.from([0x02, 0x01, 0x00]);
 
-  // PDU: GetRequest (0xA0)
+  // PDU: GetRequest (0xA0) or GetNextRequest (0xA1)
   const pduBody = Buffer.concat([reqIdBuf, errStatusBuf, errIdxBuf, varBindListBuf]);
   const pduBuf = Buffer.concat([
-    Buffer.from([0xa0, pduBody.length]),
+    Buffer.from([pduType, pduBody.length]),
     pduBody,
   ]);
 
@@ -110,8 +110,16 @@ export function buildSnmpGetPacket(community: string, oidStr: string, requestId 
   ]);
 }
 
+export interface SnmpResult {
+  success: boolean;
+  oid?: string;
+  value?: any;
+  rawText?: string;
+  error?: string;
+}
+
 /**
- * Sends a real SNMP v2c UDP Query to OLT IP and parses ASN.1 response
+ * Sends a single SNMP GET query (pduType 0xA0)
  */
 export function snmpGetReal(
   host: string,
@@ -119,7 +127,31 @@ export function snmpGetReal(
   oidStr: string,
   port = 161,
   timeoutMs = 3000
-): Promise<{ success: boolean; oid?: string; value?: any; rawText?: string; error?: string }> {
+): Promise<SnmpResult> {
+  return sendSnmpUDP(host, community, oidStr, 0xa0, port, timeoutMs);
+}
+
+/**
+ * Sends a single SNMP GETNEXT query (pduType 0xA1)
+ */
+export function snmpGetNextReal(
+  host: string,
+  community: string,
+  oidStr: string,
+  port = 161,
+  timeoutMs = 3000
+): Promise<SnmpResult> {
+  return sendSnmpUDP(host, community, oidStr, 0xa1, port, timeoutMs);
+}
+
+function sendSnmpUDP(
+  host: string,
+  community: string,
+  oidStr: string,
+  pduType: number,
+  port = 161,
+  timeoutMs = 3000
+): Promise<SnmpResult> {
   return new Promise((resolve) => {
     const client = dgram.createSocket('udp4');
     let resolved = false;
@@ -128,7 +160,7 @@ export function snmpGetReal(
       if (!resolved) {
         resolved = true;
         client.close();
-        resolve({ success: false, error: `SNMP UDP query timed out after ${timeoutMs}ms (${host}:${port})` });
+        resolve({ success: false, error: `SNMP query timeout after ${timeoutMs}ms (${host}:${port})` });
       }
     }, timeoutMs);
 
@@ -148,32 +180,37 @@ export function snmpGetReal(
         client.close();
 
         try {
-          // Parse ASN.1 SNMP Response
-          // Primitive parsing for scalar or string values
-          const msgStr = msg.toString('latin1');
-          const valueOffset = msg.length - 20;
-
-          // Attempt string or integer extraction from buffer
-          let parsedValue: any = null;
+          let returnedOid = oidStr;
+          let parsedVal: any = null;
           let strVal = '';
 
-          for (let i = 0; i < msg.length - 2; i++) {
-            // Check for INTEGER (0x02)
-            if (msg[i] === 0x02 && msg[i + 1] <= 8) {
-              let val = 0;
-              const len = msg[i + 1];
-              for (let k = 0; k < len; k++) {
-                val = (val << 8) | msg[i + 2 + k];
+          // Find OID in response buffer (Tag 0x06)
+          for (let i = 0; i < msg.length - 4; i++) {
+            if (msg[i] === 0x06) {
+              const oidLen = msg[i + 1];
+              if (oidLen > 0 && i + 2 + oidLen <= msg.length) {
+                returnedOid = decodeOid(msg, i + 2, oidLen);
+                break;
               }
-              if (parsedValue === null) parsedValue = val;
             }
-            // Check for OCTET STRING (0x04)
-            if (msg[i] === 0x04 && msg[i + 1] > 2 && msg[i + 1] < 128) {
-              const strLen = msg[i + 1];
-              if (i + 2 + strLen <= msg.length) {
-                const subStr = msg.subarray(i + 2, i + 2 + strLen).toString('utf8');
-                if (subStr.trim().length > 0) {
-                  strVal = subStr.trim();
+          }
+
+          // Find Values (INTEGER 0x02, OCTET STRING 0x04, Gauge/Counter 0x41/0x42, Timeticks 0x43)
+          for (let i = 10; i < msg.length - 1; i++) {
+            const tag = msg[i];
+            const len = msg[i + 1];
+
+            if ((tag === 0x02 || tag === 0x41 || tag === 0x42 || tag === 0x43) && len > 0 && len <= 8) {
+              let num = 0;
+              for (let k = 0; k < len; k++) {
+                num = (num << 8) | msg[i + 2 + k];
+              }
+              if (parsedVal === null) parsedVal = num;
+            } else if (tag === 0x04 && len > 0 && len < 256) {
+              if (i + 2 + len <= msg.length) {
+                const s = msg.subarray(i + 2, i + 2 + len).toString('utf8').trim();
+                if (s.length > 0) {
+                  strVal = s;
                 }
               }
             }
@@ -181,18 +218,19 @@ export function snmpGetReal(
 
           resolve({
             success: true,
-            oid: oidStr,
-            value: parsedValue ?? strVal,
-            rawText: strVal || (parsedValue !== null ? String(parsedValue) : msgStr),
+            oid: returnedOid,
+            value: parsedVal ?? strVal,
+            rawText: strVal || (parsedVal !== null ? String(parsedVal) : ''),
           });
         } catch (e: any) {
-          resolve({ success: false, error: `ASN.1 parsing error: ${e.message}` });
+          resolve({ success: false, error: `ASN.1 decode error: ${e.message}` });
         }
       }
     });
 
     try {
-      const packet = buildSnmpGetPacket(community, oidStr);
+      const reqId = Math.floor(Math.random() * 65535) + 1;
+      const packet = buildSnmpPacket(community, oidStr, pduType, reqId);
       client.send(packet, 0, packet.length, port, host, (err) => {
         if (err && !resolved) {
           resolved = true;
@@ -210,4 +248,39 @@ export function snmpGetReal(
       }
     }
   });
+}
+
+/**
+ * Performs a REAL SNMP WALK over an OID sub-tree (e.g. ONU Table)
+ */
+export async function snmpWalkReal(
+  host: string,
+  community: string,
+  rootOid: string,
+  maxIterations = 64,
+  port = 161,
+  timeoutMs = 2500
+): Promise<SnmpResult[]> {
+  const results: SnmpResult[] = [];
+  let currentOid = rootOid;
+  const cleanRoot = rootOid.replace(/^\./, '');
+
+  for (let i = 0; i < maxIterations; i++) {
+    const res = await snmpGetNextReal(host, community, currentOid, port, timeoutMs);
+    if (!res.success || !res.oid) break;
+
+    const cleanResOid = res.oid.replace(/^\./, '');
+    if (!cleanResOid.startsWith(cleanRoot)) {
+      break; // Reached end of sub-tree
+    }
+
+    if (cleanResOid === currentOid.replace(/^\./, '')) {
+      break; // Prevent infinite loop if OLT loops on same OID
+    }
+
+    results.push(res);
+    currentOid = res.oid;
+  }
+
+  return results;
 }
