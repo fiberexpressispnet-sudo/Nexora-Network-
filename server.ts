@@ -2727,13 +2727,170 @@ async function startServer() {
 
         if (targetRouter) {
           const resolvedParams = resolveRouterCredentials(targetRouter);
-          const speedStr = `${createdClient.uploadSpeed || "10M"}/${createdClient.downloadSpeed || createdClient.bandwidth || "20M"}`.replace(/Mbps/gi, "M").replace(/\s+/g, "");
-          
-          const syncRes = await syncMikrotikClientQueue(resolvedParams, createdClient, speedStr, createdClient.priority || "8");
-          if (syncRes.success) {
+          const cleanHost = resolvedParams.host;
+          const isExplicitDemo = (process.env.MIKROTIK_MOCK_MODE === "true") || (!targetRouter || targetRouter.isDemo || cleanHost === 'demo.mikrotik.local' || cleanHost === '127.0.0.1');
+
+          if (isExplicitDemo) {
             mikrotikSynced = true;
           } else {
-            mikrotikErrorMsg = syncRes.error || "MikroTik queue / secret sync failed";
+            // Execute the exact complete provisioning sequence as /api/mikrotik/sync-client
+            const cleanProfile = String(createdClient.package || 'default').replace(/[^\w-]/g, '_') || 'default';
+            const isMobile = createdClient.device === 'Mobile' || createdClient.deviceType === 'Mobile' || createdClient.connectionType === 'hotspot' || createdClient.connectionType === 'Hotspot';
+            const sharedUsersLimit = isMobile ? '1' : '8';
+            
+            const dlRaw = String(createdClient.downloadSpeed || createdClient.bandwidth || '20').replace(/[^\d.]/g, '') || '20';
+            const ulRaw = String(createdClient.uploadSpeed || '10').replace(/[^\d.]/g, '') || '10';
+            const limitSpeed = `${ulRaw}M/${dlRaw}M`;
+            const isDisabled = false; // Must be enabled upon approval
+
+            const secretPassword = createdClient.password && String(createdClient.password).trim() !== '' ? String(createdClient.password).trim() : '123456';
+            const expiryStr = createdClient.expiry || createdClient.expiryDate || 'No Expiry';
+            const prioStr = String(createdClient.priority || '8');
+            const clientComment = `FE | Exp: ${expiryStr} | Prio: ${prioStr} | ${createdClient.name || 'Client'} | ${createdClient.phone || ''}`.slice(0, 100);
+
+            const isPppoe = createdClient.connectionType === 'pppoe' || createdClient.connectionType === 'PPPoE' || createdClient.deviceType === 'Router' || createdClient.device === 'Router' || !createdClient.deviceType || !createdClient.connectionType;
+            const isHotspot = createdClient.connectionType === 'hotspot' || createdClient.connectionType === 'Hotspot' || createdClient.deviceType === 'Mobile' || createdClient.device === 'Mobile' || !createdClient.deviceType || !createdClient.connectionType;
+
+            let pppoeSynced = !isPppoe;
+            let hotspotSynced = !isHotspot;
+            let pppoeError = '';
+            let hotspotError = '';
+
+            // 1. PPPoE Secret Provisioning
+            if (isPppoe) {
+              try {
+                const pppProfileRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/profile/print', `?name=${cleanProfile}`], 2, 800);
+                let pppProfileExists = false;
+                let pppProfileId = '';
+                if (pppProfileRes.success && pppProfileRes.sentences?.length) {
+                  for (const sent of pppProfileRes.sentences) {
+                    let id = '';
+                    let name = '';
+                    for (const w of sent) {
+                      if (w.startsWith('=.id=')) id = w.substring(5);
+                      if (w.startsWith('=name=')) name = w.substring(6);
+                    }
+                    if (name === cleanProfile) {
+                      pppProfileExists = true;
+                      pppProfileId = id;
+                      break;
+                    }
+                  }
+                }
+
+                if (pppProfileExists && pppProfileId) {
+                  await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/profile/set', `=.id=${pppProfileId}`, `=rate-limit=${limitSpeed}`], 2, 800);
+                } else {
+                  await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/profile/add', `=name=${cleanProfile}`, `=rate-limit=${limitSpeed}`, '=only-one=yes'], 2, 800);
+                }
+
+                const pppSecretRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/secret/print', `?name=${createdClient.userId}`], 2, 800);
+                let secretExists = false;
+                let secretId = '';
+                if (pppSecretRes.success && pppSecretRes.sentences?.length) {
+                  for (const sent of pppSecretRes.sentences) {
+                    let id = '';
+                    let name = '';
+                    for (const w of sent) {
+                      if (w.startsWith('=.id=')) id = w.substring(5);
+                      if (w.startsWith('=name=')) name = w.substring(6);
+                    }
+                    if (name === createdClient.userId) {
+                      secretExists = true;
+                      secretId = id;
+                      break;
+                    }
+                  }
+                }
+
+                if (secretExists && secretId) {
+                  const setRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/secret/set', `=.id=${secretId}`, `=password=${secretPassword}`, `=profile=${cleanProfile}`, `=service=any`, `=comment=${clientComment}`, `=disabled=no`], 2, 800);
+                  if (setRes.success) pppoeSynced = true;
+                  else pppoeError = setRes.error || "Failed to update PPPoE secret";
+                } else {
+                  const addRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ppp/secret/add', `=name=${createdClient.userId}`, `=password=${secretPassword}`, `=profile=${cleanProfile}`, `=service=any`, `=comment=${clientComment}`, `=disabled=no`], 2, 800);
+                  if (addRes.success) pppoeSynced = true;
+                  else pppoeError = addRes.error || "Failed to add PPPoE secret";
+                }
+              } catch (pppEx: any) {
+                pppoeError = pppEx.message;
+              }
+            }
+
+            // 2. Hotspot User Provisioning
+            if (isHotspot) {
+              try {
+                const profilePrint = await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/profile/print', `?name=${cleanProfile}`], 2, 800);
+                let profileExists = false;
+                let profileId = '';
+                if (profilePrint.success && profilePrint.sentences?.length) {
+                  for (const sent of profilePrint.sentences) {
+                    let hasId = '';
+                    let hasName = '';
+                    for (const word of sent) {
+                      if (word.startsWith('=.id=')) hasId = word.substring(5);
+                      if (word.startsWith('=name=')) hasName = word.substring(6);
+                    }
+                    if (hasName === cleanProfile) {
+                      profileExists = true;
+                      profileId = hasId;
+                      break;
+                    }
+                  }
+                }
+
+                if (profileExists && profileId) {
+                  await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/profile/set', `=.id=${profileId}`, `=shared-users=${sharedUsersLimit}`, `=rate-limit=${limitSpeed}`], 2, 800);
+                } else {
+                  await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/profile/add', `=name=${cleanProfile}`, `=shared-users=${sharedUsersLimit}`, `=rate-limit=${limitSpeed}`], 2, 800);
+                }
+
+                const printRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/print', `?name=${createdClient.userId}`], 2, 800);
+                let userExists = false;
+                let userObjectId = '';
+                if (printRes.success && printRes.sentences?.length) {
+                  for (const sent of printRes.sentences) {
+                    let hasId = '';
+                    let hasName = '';
+                    for (const word of sent) {
+                      if (word.startsWith('=.id=')) hasId = word.substring(5);
+                      if (word.startsWith('=name=')) hasName = word.substring(6);
+                    }
+                    if (hasName === createdClient.userId) {
+                      userExists = true;
+                      userObjectId = hasId;
+                      break;
+                    }
+                  }
+                }
+
+                if (userExists && userObjectId) {
+                  const hsSetRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/set', `=.id=${userObjectId}`, `=password=${secretPassword}`, `=profile=${cleanProfile}`, `=comment=${clientComment}`, `=disabled=no`], 2, 800);
+                  if (hsSetRes.success) hotspotSynced = true;
+                  else hotspotError = hsSetRes.error || "Failed to update Hotspot user";
+                } else {
+                  const hsAddRes = await queryMikrotikSocketWithRetry(resolvedParams, ['/ip/hotspot/user/add', `=name=${createdClient.userId}`, `=password=${secretPassword}`, `=profile=${cleanProfile}`, `=comment=${clientComment}`, `=disabled=no`], 2, 800);
+                  if (hsAddRes.success) hotspotSynced = true;
+                  else hotspotError = hsAddRes.error || "Failed to add Hotspot user";
+                }
+              } catch (hotEx: any) {
+                hotspotError = hotEx.message;
+              }
+            }
+
+            // 3. Simple Queue Synchronization
+            const speedStr = `${ulRaw}M/${dlRaw}M`;
+            const queueRes = await syncMikrotikClientQueue(resolvedParams, createdClient, speedStr, createdClient.priority || "8");
+
+            const pppOk = !isPppoe || pppoeSynced;
+            const hsOk = !isHotspot || hotspotSynced;
+            const queueOk = queueRes.success;
+
+            if (pppOk && hsOk && queueOk) {
+              mikrotikSynced = true;
+            } else {
+              mikrotikErrorMsg = `PPPoE: ${pppoeError || 'OK'}, Hotspot: ${hotspotError || 'OK'}, Queue: ${queueRes.error || 'OK'}`;
+            }
           }
         } else {
           if (process.env.MIKROTIK_MOCK_MODE === 'true' || isMockModeAllowed()) {
@@ -2747,7 +2904,6 @@ async function startServer() {
       }
 
       if (!mikrotikSynced && process.env.MIKROTIK_MOCK_MODE !== 'true' && !isMockModeAllowed()) {
-        // DO NOT mark order approved if MikroTik provisioning failed
         order.status = "provisioning_failed";
         order.error = mikrotikErrorMsg;
         ordersList[orderIndex] = order;
