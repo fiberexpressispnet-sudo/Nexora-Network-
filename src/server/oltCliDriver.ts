@@ -114,7 +114,8 @@ export function queryOltTelnetCli(
 }
 
 /**
- * Parses raw OLT CLI Telnet/SSH response string for real ONUs, Serial Numbers, Statuses, Distances, & RX/TX Powers
+ * Parses raw OLT CLI Telnet/SSH response string for real ONUs, Serial Numbers, Statuses, Distances, & RX/TX Powers.
+ * Strictly parses real values from CLI response without inventing fake or random data.
  */
 export function parseOltCliOutput(raw: string, brand: string): CliOnuRecord[] {
   if (!raw || raw.length < 10) return [];
@@ -122,13 +123,12 @@ export function parseOltCliOutput(raw: string, brand: string): CliOnuRecord[] {
   const onus: CliOnuRecord[] = [];
   const lines = raw.split(/\r?\n/);
 
-  // Regex patterns for various vendor outputs
-  // e.g. "0/1/1:1  HWTC12345678  online  -19.8dBm  2.1dBm  1250m"
+  // Regex patterns for vendor serial numbers & MACs
   const snRegex = /(HWTC|ZTEG|VSOL|BDCM|FHTT|CATA|EPON|GPON)[0-9A-F]{8,12}/gi;
-  const dbmRegex = /(-[0-9]{1,2}\.[0-9]{1,2})\s*(dBm)?/gi;
   const macRegex = /([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})/g;
+  const dbmRegex = /(-?[0-9]{1,2}\.[0-9]{1,2})\s*(dBm)?/gi;
+  const portIndexRegex = /([0-9]{1,2})\/([0-9]{1,2})\/([0-9]{1,2}):([0-9]{1,3})/;// e.g. 0/1/2:3
 
-  let onuIdx = 1;
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('Show') || trimmed.startsWith('Display') || trimmed.includes('----')) {
@@ -137,61 +137,96 @@ export function parseOltCliOutput(raw: string, brand: string): CliOnuRecord[] {
 
     const matchedSn = trimmed.match(snRegex);
     const matchedMac = trimmed.match(macRegex);
+
+    // Strictly skip line if no real Serial Number or MAC is found
+    if (!matchedSn && !matchedMac) {
+      continue;
+    }
+
+    const sn = matchedSn ? matchedSn[0].toUpperCase() : '';
+    const mac = matchedMac ? matchedMac[0] : 'N/A';
+
+    if (!sn) continue; // Must have valid Serial Number
+
+    // Parse actual Slot / PON Port / ONU ID from line if available
+    let slot = 'N/A';
+    let ponPort = 'N/A';
+    let onuIdx = 0;
+    let onuIdStr = sn;
+
+    const portMatch = trimmed.match(portIndexRegex);
+    if (portMatch) {
+      slot = `${portMatch[1]}/${portMatch[2]}`;
+      ponPort = portMatch[3];
+      onuIdx = parseInt(portMatch[4], 10);
+      onuIdStr = `${slot}/${ponPort}:${onuIdx}`;
+    }
+
+    // Parse RX Power
     const matchedDbm = [...trimmed.matchAll(dbmRegex)];
+    let rxPower: number | null = null;
+    let txPower: number | null = null;
 
-    if (matchedSn || matchedMac) {
-      const sn = matchedSn ? matchedSn[0].toUpperCase() : `PON${Math.floor(Math.random() * 9000 + 1000)}`;
-      const mac = matchedMac ? matchedMac[0] : 'N/A';
-
-      // Parse RX Power
-      let rxPower: number | null = null;
-      if (matchedDbm.length > 0) {
-        const parsedRx = parseFloat(matchedDbm[0][1]);
-        if (!isNaN(parsedRx) && parsedRx < 0 && parsedRx > -45) {
-          rxPower = parsedRx;
+    if (matchedDbm.length > 0) {
+      const parsedVal = parseFloat(matchedDbm[0][1]);
+      if (!isNaN(parsedVal) && parsedVal < 0 && parsedVal > -45) {
+        rxPower = parsedVal;
+      }
+      if (matchedDbm.length > 1) {
+        const parsedTx = parseFloat(matchedDbm[1][1]);
+        if (!isNaN(parsedTx) && parsedTx > -10 && parsedTx < 20) {
+          txPower = parsedTx;
         }
       }
-
-      // Parse Status
-      let status: 'online' | 'offline' | 'los' | 'power_low' = 'online';
-      const lower = trimmed.toLowerCase();
-      if (lower.includes('los') || lower.includes('losi') || lower.includes('power_lost') || (rxPower !== null && rxPower <= -35)) {
-        status = 'los';
-      } else if (lower.includes('offline') || lower.includes('down') || lower.includes('deregistered')) {
-        status = 'offline';
-      } else if (rxPower !== null && rxPower <= -25) {
-        status = 'power_low';
-      }
-
-      // Parse Distance
-      let distanceMeters: number | null = null;
-      const distMatch = trimmed.match(/([0-9]{2,5})\s*(m|meter|meters)/i);
-      if (distMatch) {
-        distanceMeters = parseInt(distMatch[1], 10);
-      }
-
-      onus.push({
-        id: `0/1:${onuIdx}`,
-        slot: '0',
-        ponPort: '1',
-        onuIndex: onuIdx,
-        serialNumber: sn,
-        macAddress: mac,
-        vendor: brand,
-        name: `ONU 0/1:${onuIdx}`,
-        status,
-        rxPower,
-        txPower: rxPower !== null ? 2.1 : null,
-        temperature: status === 'online' ? 42.0 : null,
-        voltage: status === 'online' ? 3.3 : null,
-        distanceMeters,
-        uptime: status === 'online' ? 'Real-time' : null,
-        trafficRxMbps: null,
-        trafficTxMbps: null,
-      });
-
-      onuIdx++;
     }
+
+    // Parse Status
+    let status: 'online' | 'offline' | 'los' | 'power_low' = 'online';
+    const lower = trimmed.toLowerCase();
+    if (lower.includes('los') || lower.includes('losi') || lower.includes('power_lost') || (rxPower !== null && rxPower <= -35)) {
+      status = 'los';
+    } else if (lower.includes('offline') || lower.includes('down') || lower.includes('deregistered')) {
+      status = 'offline';
+    } else if (rxPower !== null && rxPower <= -25) {
+      status = 'power_low';
+    }
+
+    // Parse Distance in meters if provided in output
+    let distanceMeters: number | null = null;
+    const distMatch = trimmed.match(/([0-9]{2,5})\s*(m|meter|meters)/i);
+    if (distMatch) {
+      distanceMeters = parseInt(distMatch[1], 10);
+    }
+
+    // Parse Temperature in Celsius if provided in output
+    let temperature: number | null = null;
+    const tempMatch = trimmed.match(/([0-9]{2}\.?[0-9]?)\s*(c|deg|degree)/i);
+    if (tempMatch) {
+      const parsedTemp = parseFloat(tempMatch[1]);
+      if (!isNaN(parsedTemp) && parsedTemp > 0 && parsedTemp < 100) {
+        temperature = parsedTemp;
+      }
+    }
+
+    onus.push({
+      id: onuIdStr,
+      slot,
+      ponPort,
+      onuIndex: onuIdx,
+      serialNumber: sn,
+      macAddress: mac,
+      vendor: brand,
+      name: `ONU ${onuIdStr}`,
+      status,
+      rxPower,
+      txPower,
+      temperature,
+      voltage: null, // Strictly null unless returned by CLI
+      distanceMeters,
+      uptime: null, // Strictly null unless returned by CLI
+      trafficRxMbps: null,
+      trafficTxMbps: null,
+    });
   }
 
   return onus;

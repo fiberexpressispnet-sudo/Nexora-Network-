@@ -311,10 +311,10 @@ export const OltManagement: React.FC<OltManagementProps> = ({
     let totalPon = 0;
     let onlinePon = 0;
     olts.forEach((o) => {
-      const pCount = o.totalPonPorts || (o.brand === 'BDCOM' ? 4 : 8);
+      const pCount = o.totalPonPorts || 0;
       totalPon += pCount;
       if (o.status === 'online') {
-        onlinePon += Math.ceil(pCount * 0.75);
+        onlinePon += o.onlinePonPorts || 0;
       }
     });
 
@@ -352,15 +352,14 @@ export const OltManagement: React.FC<OltManagementProps> = ({
   }, [stats]);
 
   const ponTrafficChartData = useMemo(() => {
-    return [
-      { name: 'PON 0/1', download: 340, upload: 110 },
-      { name: 'PON 0/2', download: 420, upload: 145 },
-      { name: 'PON 0/3', download: 280, upload: 90 },
-      { name: 'PON 0/4', download: 510, upload: 180 },
-      { name: 'PON 0/5', download: 190, upload: 65 },
-      { name: 'PON 0/6', download: 310, upload: 105 },
-    ];
-  }, []);
+    return onus
+      .filter((o) => o.trafficRxMbps !== null || o.trafficTxMbps !== null)
+      .map((o) => ({
+        name: o.id,
+        download: o.trafficRxMbps || 0,
+        upload: o.trafficTxMbps || 0,
+      }));
+  }, [onus]);
 
   const opticalPowerTrendData = useMemo(() => {
     return [

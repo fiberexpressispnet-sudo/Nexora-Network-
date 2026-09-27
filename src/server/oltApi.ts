@@ -1,7 +1,7 @@
 import net from 'net';
 import crypto from 'crypto';
 import { snmpGetReal, snmpWalkReal } from './snmpClient';
-import { queryOltTelnetCli, CliOnuRecord } from './oltCliDriver';
+import { queryOltTelnetCli } from './oltCliDriver';
 
 export interface OLTServerConfig {
   id: string;
@@ -130,7 +130,8 @@ export function checkSocketReachability(
 
 /**
  * Production-Ready Real OLT System Details Query
- * Multi-Vendor OID Mapping: Huawei, ZTE, VSOL, BDCOM, FiberHome
+ * Multi-Vendor OID Profiles: Huawei, ZTE, VSOL, BDCOM, FiberHome
+ * Strictly returns null for unsupported OIDs (UI displays "N/A" / "Unsupported")
  */
 export async function queryRealOltSystemDetails(
   olt: OLTServerConfig,
@@ -168,6 +169,8 @@ export async function queryRealOltSystemDetails(
   let tempVal: number | null = null;
   let uptimeStr: string | null = null;
   let firmwareStr: string | null = null;
+  let powerSupplyStatus: string | null = null;
+  let fanStatus: string | null = null;
 
   try {
     // 1. sysUpTime.0 (.1.3.6.1.2.1.1.3.0)
@@ -186,24 +189,29 @@ export async function queryRealOltSystemDetails(
     // 2. sysDescr.0 (.1.3.6.1.2.1.1.1.0)
     const sysDescrRes = await snmpGetReal(olt.ip, community, '1.3.6.1.2.1.1.1.0', port, 2500);
     if (sysDescrRes.success && sysDescrRes.rawText) {
-      firmwareStr = sysDescrRes.rawText.slice(0, 50);
+      firmwareStr = sysDescrRes.rawText.slice(0, 60);
     }
 
-    // 3. Multi-Vendor CPU & Memory OIDs
+    // 3. Multi-Vendor CPU, Memory, & Temp OIDs
     let cpuOids = ['1.3.6.1.4.1.2011.6.3.3.1.1.3', '1.3.6.1.4.1.2011.5.25.31.1.1.1.1.5']; // Huawei
+    let memOids = ['1.3.6.1.4.1.2011.6.3.3.1.1.4'];
     let tempOids = ['1.3.6.1.4.1.2011.5.25.31.1.1.1.1.11'];
 
     if (olt.brand === 'ZTE') {
       cpuOids = ['1.3.6.1.4.1.3902.1082.500.10.2.3.1', '1.3.6.1.4.1.3902.3.3.1.1.4.1'];
+      memOids = ['1.3.6.1.4.1.3902.1082.500.10.2.3.2'];
       tempOids = ['1.3.6.1.4.1.3902.1082.500.10.2.2.1.2'];
     } else if (olt.brand === 'VSOL') {
       cpuOids = ['1.3.6.1.4.1.37950.1.1.5.12.1.0', '1.3.6.1.4.1.37950.1.1.5.1'];
+      memOids = ['1.3.6.1.4.1.37950.1.1.5.12.2.0'];
       tempOids = ['1.3.6.1.4.1.37950.1.1.5.12.3.0'];
     } else if (olt.brand === 'BDCOM') {
       cpuOids = ['1.3.6.1.4.1.3320.9.109.1.1.1.2', '1.3.6.1.4.1.3320.2.1.2'];
+      memOids = ['1.3.6.1.4.1.3320.9.109.1.1.1.3'];
       tempOids = ['1.3.6.1.4.1.3320.9.181.1.1.1.2'];
     } else if (olt.brand === 'FiberHome') {
       cpuOids = ['1.3.6.1.4.1.5875.8.1.1.1'];
+      memOids = ['1.3.6.1.4.1.5875.8.1.1.2'];
     }
 
     for (const cOid of cpuOids) {
@@ -214,12 +222,32 @@ export async function queryRealOltSystemDetails(
       }
     }
 
+    for (const mOid of memOids) {
+      const mRes = await snmpGetReal(olt.ip, community, mOid, port, 1500);
+      if (mRes.success && typeof mRes.value === 'number' && mRes.value >= 0 && mRes.value <= 100) {
+        memVal = mRes.value;
+        break;
+      }
+    }
+
     for (const tOid of tempOids) {
       const tRes = await snmpGetReal(olt.ip, community, tOid, port, 1500);
       if (tRes.success && typeof tRes.value === 'number' && tRes.value > 0 && tRes.value < 120) {
         tempVal = tRes.value;
         break;
       }
+    }
+
+    // Power Supply OID Query (.1.3.6.1.4.1.2011.5.25.31.1.1.1.1.2 or .1.3.6.1.2.1.1)
+    const pwrRes = await snmpGetReal(olt.ip, community, '1.3.6.1.4.1.2011.5.25.31.1.1.1.1.2', port, 1200);
+    if (pwrRes.success && pwrRes.rawText) {
+      powerSupplyStatus = pwrRes.rawText;
+    }
+
+    // Fan Status OID Query (.1.3.6.1.4.1.2011.5.25.31.1.1.1.1.3)
+    const fanRes = await snmpGetReal(olt.ip, community, '1.3.6.1.4.1.2011.5.25.31.1.1.1.1.3', port, 1200);
+    if (fanRes.success && fanRes.rawText) {
+      fanStatus = fanRes.rawText;
     }
   } catch (err) {
     console.warn(`SNMP Query Warning for OLT ${olt.ip}:`, err);
@@ -233,14 +261,15 @@ export async function queryRealOltSystemDetails(
     firmware: firmwareStr,
     hardwareVersion: null,
     serialNumber: null,
-    powerSupplyStatus: isReachable ? 'Dual Redundant AC/DC Power OK' : null,
-    fanStatus: isReachable ? 'Fans Operational' : null,
+    powerSupplyStatus,
+    fanStatus,
   };
 }
 
 /**
  * Production-Ready Real PON Ports Walk
  * Walks SNMP ifTable / ifDescr / ifOperStatus for actual PON ports & throughput
+ * Strictly returns [] if no PON ports are returned by SNMP. Does NOT invent fake fallback PON ports!
  */
 export async function queryRealOltPonPorts(olt: OLTServerConfig, isReachable: boolean) {
   if (!isReachable) return [];
@@ -253,73 +282,73 @@ export async function queryRealOltPonPorts(olt: OLTServerConfig, isReachable: bo
     // Walk ifDescr (.1.3.6.1.2.1.2.2.1.2)
     const ifDescrResults = await snmpWalkReal(olt.ip, community, '1.3.6.1.2.1.2.2.1.2', 32, port, 2000);
 
-    let idx = 1;
     for (const r of ifDescrResults) {
-      const descr = String(r.rawText || r.value || '');
+      const descr = String(r.rawText || r.value || '').trim();
       const lower = descr.toLowerCase();
 
       if (lower.includes('gpon') || lower.includes('epon') || lower.includes('pon') || lower.includes('ge')) {
-        // Query ifOperStatus for this port
+        let adminStatus: 'up' | 'down' = 'up';
         let operStatus: 'up' | 'down' = 'up';
+        let rxBytes: number | null = null;
+        let txBytes: number | null = null;
+
         if (r.oid) {
           const ifIdx = r.oid.split('.').pop();
+
+          // Query ifAdminStatus
+          const adminRes = await snmpGetReal(olt.ip, community, `1.3.6.1.2.1.2.2.1.7.${ifIdx}`, port, 1000);
+          if (adminRes.success && adminRes.value === 2) adminStatus = 'down';
+
+          // Query ifOperStatus
           const operRes = await snmpGetReal(olt.ip, community, `1.3.6.1.2.1.2.2.1.8.${ifIdx}`, port, 1000);
-          if (operRes.success && operRes.value === 2) {
-            operStatus = 'down';
-          }
+          if (operRes.success && operRes.value === 2) operStatus = 'down';
+
+          // Query ifInOctets (RX) & ifOutOctets (TX)
+          const inRes = await snmpGetReal(olt.ip, community, `1.3.6.1.2.1.2.2.1.10.${ifIdx}`, port, 1000);
+          if (inRes.success && typeof inRes.value === 'number') rxBytes = inRes.value;
+
+          const outRes = await snmpGetReal(olt.ip, community, `1.3.6.1.2.1.2.2.1.16.${ifIdx}`, port, 1000);
+          if (outRes.success && typeof outRes.value === 'number') txBytes = outRes.value;
+        }
+
+        // Calculate Slot & PON Port from interface description string (e.g. "GPON 0/1/2")
+        let slot = 'N/A';
+        let pPort = 'N/A';
+        const match = descr.match(/([0-9]{1,2})\/([0-9]{1,2})\/([0-9]{1,2})/);
+        if (match) {
+          slot = `${match[1]}/${match[2]}`;
+          pPort = match[3];
         }
 
         ponPorts.push({
-          slot: '0',
-          ponPort: `${idx}`,
-          portName: descr || `PON 0/${idx}`,
-          adminStatus: 'up',
+          slot,
+          ponPort: pPort,
+          portName: descr,
+          adminStatus,
           operStatus,
           totalOnu: 0,
           onlineOnu: 0,
           offlineOnu: 0,
           losCount: 0,
           txPowerDbm: null,
-          rxTrafficMbps: null,
-          txTrafficMbps: null,
+          rxTrafficMbps: rxBytes ? parseFloat(((rxBytes * 8) / 1000000).toFixed(1)) : null,
+          txTrafficMbps: txBytes ? parseFloat(((txBytes * 8) / 1000000).toFixed(1)) : null,
         });
-
-        idx++;
       }
     }
   } catch (err) {
     console.warn(`PON Ports Walk warning for OLT ${olt.ip}:`, err);
   }
 
-  // Fallback to configured PON count if ifTable is restricted
-  if (ponPorts.length === 0) {
-    const totalPorts = olt.totalPonPorts || (olt.brand === 'BDCOM' ? 4 : 8);
-    for (let i = 1; i <= totalPorts; i++) {
-      ponPorts.push({
-        slot: '0',
-        ponPort: `${i}`,
-        portName: `PON 0/${i}`,
-        adminStatus: 'up',
-        operStatus: 'up',
-        totalOnu: 0,
-        onlineOnu: 0,
-        offlineOnu: 0,
-        losCount: 0,
-        txPowerDbm: null,
-        rxTrafficMbps: null,
-        txTrafficMbps: null,
-      });
-    }
-  }
-
+  // Returns ONLY real SNMP discovered PON ports (or [] if none found)
   return ponPorts;
 }
 
 /**
  * Production-Ready Real ONU Discovery Engine
- * Performs Real SNMP MIB Walk + Telnet CLI Query
- * Returns ONLY real discovered ONUs with real Optical RX/TX, Temperature, Distance & LOS!
- * Returns EMPTY ARRAY ([]) if 0 ONUs are registered or OLT is offline.
+ * Correlates exact SNMP WALK table indices across Serial, RX, TX, Status, Distance, Temperature & Voltage.
+ * Returns ONLY real discovered ONUs or EMPTY ARRAY ([]) if 0 ONUs exist on the OLT.
+ * Strictly avoids any hardcoded or fake strings ("3.3", "42", "2.1", "Real-time", "0/1:x").
  */
 export async function queryRealOltOnus(
   olt: OLTServerConfig,
@@ -333,117 +362,165 @@ export async function queryRealOltOnus(
   const port = olt.managementPort || 161;
   const discoveredOnus: any[] = [];
 
-  // Step 1: SNMP Tree Walk over Vendor ONU Serial Number MIB
   try {
+    // Multi-Vendor ONU MIB OID Roots
     let snOidRoot = '1.3.6.1.4.1.2011.6.128.1.1.2.43.1.3'; // Huawei
     let rxOidRoot = '1.3.6.1.4.1.2011.6.128.1.1.2.51.1.4';
     let txOidRoot = '1.3.6.1.4.1.2011.6.128.1.1.2.51.1.6';
     let statusOidRoot = '1.3.6.1.4.1.2011.6.128.1.1.2.46.1.15';
     let distOidRoot = '1.3.6.1.4.1.2011.6.128.1.1.2.46.1.20';
     let tempOidRoot = '1.3.6.1.4.1.2011.6.128.1.1.2.51.1.1';
+    let voltOidRoot = '1.3.6.1.4.1.2011.6.128.1.1.2.51.1.2';
 
     if (olt.brand === 'ZTE') {
       snOidRoot = '1.3.6.1.4.1.3902.1012.3.28.1.1.5';
       rxOidRoot = '1.3.6.1.4.1.3902.1012.3.50.12.1.1.10';
+      txOidRoot = '1.3.6.1.4.1.3902.1012.3.50.12.1.1.14';
       statusOidRoot = '1.3.6.1.4.1.3902.1012.3.28.2.1.4';
       distOidRoot = '1.3.6.1.4.1.3902.1012.3.28.2.1.2';
+      tempOidRoot = '1.3.6.1.4.1.3902.1012.3.50.12.1.1.2';
     } else if (olt.brand === 'VSOL') {
       snOidRoot = '1.3.6.1.4.1.37950.1.1.5.10.3.1.1.2';
       rxOidRoot = '1.3.6.1.4.1.37950.1.1.5.12.2.1.4';
+      txOidRoot = '1.3.6.1.4.1.37950.1.1.5.12.2.1.3';
       statusOidRoot = '1.3.6.1.4.1.37950.1.1.5.10.3.1.1.4';
       distOidRoot = '1.3.6.1.4.1.37950.1.1.5.10.3.1.1.8';
+      tempOidRoot = '1.3.6.1.4.1.37950.1.1.5.12.2.1.1';
     } else if (olt.brand === 'BDCOM') {
       snOidRoot = '1.3.6.1.4.1.3320.101.10.1.1.3';
       rxOidRoot = '1.3.6.1.4.1.3320.101.10.5.1.5';
+      txOidRoot = '1.3.6.1.4.1.3320.101.10.5.1.6';
       statusOidRoot = '1.3.6.1.4.1.3320.101.10.1.1.26';
+      distOidRoot = '1.3.6.1.4.1.3320.101.10.1.1.27';
+      tempOidRoot = '1.3.6.1.4.1.3320.101.10.5.1.2';
     }
 
+    // Step A: Walk Serial Numbers
     const snResults = await snmpWalkReal(olt.ip, community, snOidRoot, 64, port, olt.timeoutMs || 2500);
 
-    let onuIdx = 1;
     for (const item of snResults) {
       const snStr = String(item.rawText || item.value || '').trim();
-      if (snStr.length >= 6) {
-        const oidSuffix = item.oid ? item.oid.split('.').slice(-2).join('.') : `${onuIdx}`;
-        const mapping = mappings.find((m) => m.serialNumber === snStr);
+      if (!snStr || snStr.length < 6) continue;
 
-        // Query RX Power for this ONU
-        let rxPower: number | null = null;
-        let txPower: number | null = null;
-        let temp: number | null = null;
-        let distance: number | null = null;
-        let status: 'online' | 'offline' | 'los' | 'power_low' = 'online';
+      // Extract exact OID index suffix (e.g. "4194304000.1") to correlate across MIB tables
+      const cleanOid = item.oid ? item.oid.replace(/^\./, '') : '';
+      const cleanRoot = snOidRoot.replace(/^\./, '');
+      const indexSuffix = cleanOid.startsWith(cleanRoot) ? cleanOid.slice(cleanRoot.length + 1) : '';
 
-        try {
-          const rxRes = await snmpGetReal(olt.ip, community, `${rxOidRoot}.${oidSuffix}`, port, 1200);
-          if (rxRes.success && typeof rxRes.value === 'number') {
-            let val = rxRes.value;
-            if (val > 0) val = -val; // Convert positive representation if stored as positive offset
-            if (val < -100) val = val / 100; // Convert 0.01 dBm units (e.g. -1980 -> -19.8 dBm)
-            if (val < 0 && val > -45) rxPower = parseFloat(val.toFixed(1));
-          }
+      if (!indexSuffix) continue;
 
-          const txRes = await snmpGetReal(olt.ip, community, `${txOidRoot}.${oidSuffix}`, port, 1200);
-          if (txRes.success && typeof txRes.value === 'number') {
-            let val = txRes.value;
-            if (val > 100) val = val / 100;
-            if (val > -10 && val < 20) txPower = parseFloat(val.toFixed(1));
-          }
+      // Determine actual Slot / PON Port / ONU Index from OID index numbers
+      const indexParts = indexSuffix.split('.').map(Number);
+      let slotStr = 'N/A';
+      let ponPortStr = 'N/A';
+      let onuIdxNum = 0;
 
-          const distRes = await snmpGetReal(olt.ip, community, `${distOidRoot}.${oidSuffix}`, port, 1200);
-          if (distRes.success && typeof distRes.value === 'number' && distRes.value > 0) {
-            distance = distRes.value;
-          }
-
-          const statusRes = await snmpGetReal(olt.ip, community, `${statusOidRoot}.${oidSuffix}`, port, 1200);
-          if (statusRes.success && typeof statusRes.value === 'number') {
-            if (statusRes.value === 2 || statusRes.value === 3) status = 'los';
-            else if (statusRes.value === 0 || statusRes.value === 4) status = 'offline';
-          }
-        } catch (e) {
-          // Keep null for unprovided fields
-        }
-
-        if (rxPower !== null && rxPower <= -25 && status !== 'los') {
-          status = 'power_low';
-        }
-
-        discoveredOnus.push({
-          id: `0/1:${onuIdx}`,
-          oltId: olt.id,
-          oltName: olt.name,
-          slot: '0',
-          ponPort: '1',
-          onuIndex: onuIdx,
-          serialNumber: snStr,
-          macAddress: 'N/A',
-          vendor: olt.brand,
-          name: mapping?.clientName ? `Subscriber: ${mapping.clientName}` : `Discovered ONU 0/1:${onuIdx}`,
-          status,
-          rxPower,
-          txPower,
-          temperature: temp,
-          voltage: status === 'online' ? 3.3 : null,
-          distanceMeters: distance,
-          uptime: status === 'online' ? 'Real-time' : null,
-          lastOnline: status === 'online' ? 'Now' : 'Offline',
-          lastOffline: status !== 'online' ? 'Recently' : null,
-          losStatus: status === 'los',
-          trafficRxMbps: null,
-          trafficTxMbps: null,
-          mappedClientId: mapping?.clientId || null,
-          mappedClientName: mapping?.clientName || null,
-          mappedUserId: mapping?.userId || null,
-        });
-
-        onuIdx++;
+      if (indexParts.length >= 2) {
+        const rawPort = indexParts[indexParts.length - 2];
+        const rawOnu = indexParts[indexParts.length - 1];
+        slotStr = `${Math.floor(rawPort / 256)}`;
+        ponPortStr = `${rawPort % 256}`;
+        onuIdxNum = rawOnu;
+      } else if (indexParts.length === 1) {
+        onuIdxNum = indexParts[0];
       }
+
+      const onuIdFormatted = slotStr !== 'N/A' ? `${slotStr}/${ponPortStr}:${onuIdxNum}` : `${indexSuffix}`;
+      const mapping = mappings.find((m) => m.serialNumber === snStr);
+
+      // Step B: Query exact correlated OID indices for RX, TX, Temp, Distance, Voltage, Status
+      let rxPower: number | null = null;
+      let txPower: number | null = null;
+      let temp: number | null = null;
+      let volt: number | null = null;
+      let distance: number | null = null;
+      let status: 'online' | 'offline' | 'los' | 'power_low' = 'online';
+
+      try {
+        // RX Power
+        const rxRes = await snmpGetReal(olt.ip, community, `${rxOidRoot}.${indexSuffix}`, port, 1200);
+        if (rxRes.success && typeof rxRes.value === 'number') {
+          let val = rxRes.value;
+          if (val > 0) val = -val;
+          if (val < -100) val = val / 100;
+          if (val < 0 && val > -45) rxPower = parseFloat(val.toFixed(1));
+        }
+
+        // TX Power
+        const txRes = await snmpGetReal(olt.ip, community, `${txOidRoot}.${indexSuffix}`, port, 1200);
+        if (txRes.success && typeof txRes.value === 'number') {
+          let val = txRes.value;
+          if (val > 100) val = val / 100;
+          if (val > -10 && val < 20) txPower = parseFloat(val.toFixed(1));
+        }
+
+        // Temperature
+        const tempRes = await snmpGetReal(olt.ip, community, `${tempOidRoot}.${indexSuffix}`, port, 1200);
+        if (tempRes.success && typeof tempRes.value === 'number' && tempRes.value > 0 && tempRes.value < 100) {
+          temp = tempRes.value;
+        }
+
+        // Voltage
+        const voltRes = await snmpGetReal(olt.ip, community, `${voltOidRoot}.${indexSuffix}`, port, 1200);
+        if (voltRes.success && typeof voltRes.value === 'number' && voltRes.value > 0) {
+          let vVal = voltRes.value;
+          if (vVal > 100) vVal = vVal / 1000; // mV to V
+          volt = parseFloat(vVal.toFixed(1));
+        }
+
+        // Distance
+        const distRes = await snmpGetReal(olt.ip, community, `${distOidRoot}.${indexSuffix}`, port, 1200);
+        if (distRes.success && typeof distRes.value === 'number' && distRes.value > 0) {
+          distance = distRes.value;
+        }
+
+        // Status
+        const statusRes = await snmpGetReal(olt.ip, community, `${statusOidRoot}.${indexSuffix}`, port, 1200);
+        if (statusRes.success && typeof statusRes.value === 'number') {
+          if (statusRes.value === 2 || statusRes.value === 3) status = 'los';
+          else if (statusRes.value === 0 || statusRes.value === 4) status = 'offline';
+        }
+      } catch (e) {
+        // Keep null for unprovided metrics
+      }
+
+      if (rxPower !== null && rxPower <= -25 && status !== 'los') {
+        status = 'power_low';
+      }
+
+      discoveredOnus.push({
+        id: onuIdFormatted,
+        oltId: olt.id,
+        oltName: olt.name,
+        slot: slotStr,
+        ponPort: ponPortStr,
+        onuIndex: onuIdxNum,
+        serialNumber: snStr,
+        macAddress: 'N/A',
+        vendor: olt.brand,
+        name: mapping?.clientName ? `Subscriber: ${mapping.clientName}` : `ONU ${onuIdFormatted}`,
+        status,
+        rxPower,
+        txPower,
+        temperature: temp,
+        voltage: volt,
+        distanceMeters: distance,
+        uptime: null, // Strictly null unless returned by SNMP
+        lastOnline: status === 'online' ? 'Active' : 'Offline',
+        lastOffline: status !== 'online' ? 'Offline' : null,
+        losStatus: status === 'los',
+        trafficRxMbps: null,
+        trafficTxMbps: null,
+        mappedClientId: mapping?.clientId || null,
+        mappedClientName: mapping?.clientName || null,
+        mappedUserId: mapping?.userId || null,
+      });
     }
   } catch (err) {
     console.warn(`SNMP ONU Walk Error for OLT ${olt.ip}:`, err);
   }
 
-  // Step 2: Telnet CLI Query Fallback (Port 23 / 22) if SNMP tree walk returned 0 ONUs
+  // Step C: Fallback to Telnet CLI if SNMP returns 0 ONUs
   if (discoveredOnus.length === 0) {
     try {
       const cliRes = await queryOltTelnetCli(
@@ -473,6 +550,6 @@ export async function queryRealOltOnus(
     }
   }
 
-  // Returns ONLY real discovered ONUs or empty array [] if 0 ONUs exist on the OLT!
+  // Returns ONLY real discovered ONUs or [] if 0 ONUs exist
   return discoveredOnus;
 }

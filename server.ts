@@ -4285,21 +4285,38 @@ ${clientContextText}
         });
       }
 
+      const tempOlt: OLTServerConfig = {
+        id: 'test',
+        name: 'Test OLT',
+        brand: brand || 'Generic',
+        model: model || 'Generic',
+        ip,
+        managementPort: port,
+        protocol: protocol || 'SNMPv2c',
+        username: username || 'admin',
+        snmpCommunityRead: snmpCommunityRead || 'public',
+        timeoutMs: Number(timeoutMs) || 4000,
+        enabled: true,
+        status: 'online',
+      };
+
+      const realDetails = await queryRealOltSystemDetails(tempOlt, true);
+
       res.json({
         success: true,
         message: `Connection successful! ${brand || 'OLT'} device responded at ${ip}:${port} (${protocol || 'SNMPv2c'}) in ${reachability.latencyMs}ms.`,
         latencyMs: reachability.latencyMs,
         systemInfo: {
           brand: brand || 'Generic',
-          model: model || `${brand || 'OLT'} Optical Line Terminal`,
-          serialNumber: `SN-${brand ? String(brand).toUpperCase() : 'OLT'}-${String(ip).replace(/\./g, '')}`,
-          firmware: 'v3.2.1-P4',
-          hardwareVersion: 'REV_B2',
-          uptime: '38d 14h 02m',
-          totalPonPorts: brand === 'BDCOM' ? 4 : 8,
-          cpuUsage: 28,
-          memoryUsage: 42,
-          temperature: 46,
+          model: model || `${brand || 'OLT'} Device`,
+          serialNumber: realDetails.serialNumber,
+          firmware: realDetails.firmware,
+          hardwareVersion: realDetails.hardwareVersion,
+          uptime: realDetails.uptime,
+          totalPonPorts: null,
+          cpuUsage: realDetails.cpuUsage,
+          memoryUsage: realDetails.memoryUsage,
+          temperature: realDetails.temperature,
         },
       });
     } catch (err: any) {
