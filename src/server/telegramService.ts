@@ -97,6 +97,40 @@ export function saveTelegramBotToken(token: string): void {
 }
 
 /**
+ * Retrieves the secure Telegram Webhook Secret Token.
+ */
+export function getTelegramWebhookSecret(): string {
+  if (process.env.TELEGRAM_WEBHOOK_SECRET && process.env.TELEGRAM_WEBHOOK_SECRET.trim().length >= 8) {
+    return process.env.TELEGRAM_WEBHOOK_SECRET.trim();
+  }
+  const settings = getTelegramSettings();
+  if (settings.webhookSecret && settings.webhookSecret.length >= 8) {
+    return settings.webhookSecret;
+  }
+  return '';
+}
+
+/**
+ * Validates the incoming X-Telegram-Bot-Api-Secret-Token against server-side secret.
+ */
+export function validateTelegramWebhookSecret(providedSecret?: string): boolean {
+  const expected = getTelegramWebhookSecret();
+  if (!expected) {
+    // If no webhook secret is set in env or settings, allow local development calls
+    return true;
+  }
+  if (!providedSecret) return false;
+  try {
+    const expectedBuf = Buffer.from(expected);
+    const providedBuf = Buffer.from(providedSecret);
+    if (expectedBuf.length !== providedBuf.length) return false;
+    return crypto.timingSafeEqual(expectedBuf, providedBuf);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Retrieves current Telegram Bot settings
  */
 export function getTelegramSettings(): TelegramBotSettings {
@@ -973,31 +1007,30 @@ export async function handleTelegramIncomingUpdate(update: any): Promise<void> {
   const command = rawCommand.toLowerCase().split('@')[0];
   const queryParam = args.join(' ').trim();
 
-  // If no admin is configured yet, auto-authorize this first user as Super Admin!
-  if (settings.adminChatIds.length === 0 || command === '/admin' || command === '/authorize' || command === '/authorize_admin') {
-    const updatedChatIds = Array.from(new Set([...settings.adminChatIds, chatId]));
-    updateTelegramSettings({ adminChatIds: updatedChatIds });
-    isAdmin = true;
-
-    const welcomeAdmin =
-      `<b>👑 Super Admin Setup Completed!</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `Welcome <b>${escapeHtml(fromUser?.first_name || 'Admin')}</b>!\n` +
-      `Your Telegram Chat ID (<code>${chatId}</code>) is now authorized as the <b>Primary Admin</b> for <b>Nexora Network ISP</b>.\n\n` +
-      `🔔 <b>Full Remote Management & Alerts are ACTIVE:</b>\n` +
-      `• ⚡ <b>Line Control:</b> Activate, Deactivate, Extend & Delete subscribers\n` +
-      `• 🔍 <b>Smart Search:</b> Type any Phone Number or Name to lookup and manage\n` +
-      `• 📡 <b>Diagnostics:</b> MikroTik, OLT, ONU & Fiber LOS monitoring\n` +
-      `• 🚀 <b>Alerts:</b> All 12 real-time notifications enabled\n\n` +
-      `👉 Send <b>/test_alerts</b> to receive samples of all alerts!\n` +
-      `Or type <b>/help</b> for list of commands.`;
-
-    await sendTelegramMessage(chatId, welcomeAdmin);
+  // Handle /admin, /authorize, /authorize_admin commands - never allow self-elevation!
+  if (command === '/admin' || command === '/authorize' || command === '/authorize_admin') {
+    if (isAdmin) {
+      await sendTelegramMessage(chatId, `✅ <b>Admin Status:</b> You are already an authorized administrator for Nexora Network ISP.`);
+      return;
+    }
+    await sendTelegramMessage(
+      chatId,
+      `⛔ <b>Admin Authorization Required</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+      `Your Chat ID (<code>${chatId}</code>) is not authorized.\n\n` +
+      `🔐 <b>How to Authorize:</b>\n` +
+      `1. Log in to your ISP Admin Dashboard.\n` +
+      `2. Go to <b>Settings &gt; Telegram Bot</b>.\n` +
+      `3. Click <b>"Generate Admin 1-Click Link"</b> and open the link on Telegram.`
+    );
     return;
   }
 
-  // Command to test all 12 alerts right in Telegram
+  // Command to test all 12 alerts right in Telegram (Admin only)
   if (command === '/test_alerts' || command === '/testalerts') {
+    if (!isAdmin) {
+      await sendTelegramMessage(chatId, `⛔ <b>Access Denied:</b> This command requires authorized administrator privileges.`);
+      return;
+    }
     await sendTelegramMessage(chatId, `🚀 <b>Dispatching all 12 system alerts to this chat now...</b>`);
     await dispatchAllDemoAlertsToAdmins(chatId);
     return;

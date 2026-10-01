@@ -29,6 +29,7 @@ import {
   notifyOltAlert,
   notifyOnuAlert,
   notifySlowInternetAlert,
+  validateTelegramWebhookSecret,
   startTelegramPollingWorker,
   handleTelegramIncomingUpdate,
   dispatchAllDemoAlertsToAdmins,
@@ -4972,12 +4973,41 @@ ${clientContextText}
     }
   });
 
-  // 9. Dispatch Event Notification Endpoint (Callable from frontend & server)
-  app.post("/api/telegram/notify", async (req, res) => {
+  // 9. Dispatch Event Notification Endpoint (Authenticated only)
+  app.post("/api/telegram/notify", requireClientOrAdminAuth, async (req, res) => {
     try {
       const { type, payload } = req.body;
-      if (!type || !payload) {
-        return res.status(400).json({ success: false, error: "Event type and payload are required" });
+      const ALLOWED_TYPES = [
+        "NEW_CLIENT",
+        "NEW_ORDER",
+        "PAYMENT_SUBMITTED",
+        "PAYMENT_DECISION",
+        "CLIENT_STATUS",
+        "MIKROTIK_ALERT",
+        "OLT_ALERT",
+        "ONU_ALERT",
+        "SLOW_INTERNET",
+      ];
+
+      if (!type || typeof type !== "string" || !ALLOWED_TYPES.includes(type)) {
+        return res.status(400).json({ success: false, error: "Invalid or unsupported notification event type" });
+      }
+
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        return res.status(400).json({ success: false, error: "Payload must be a valid JSON object" });
+      }
+
+      // If client is calling, prevent spoofing other clients or sending fake router/OLT alerts
+      const userRole = (req as any).userRole;
+      const clientUserId = (req as any).clientUserId;
+      if (userRole === "client") {
+        const adminOnlyEvents = ["MIKROTIK_ALERT", "OLT_ALERT", "PAYMENT_DECISION", "ONU_ALERT"];
+        if (adminOnlyEvents.includes(type)) {
+          return res.status(403).json({ success: false, error: "Access denied: Client cannot dispatch infrastructure or admin decision alerts." });
+        }
+        if (payload.userId && String(payload.userId).toLowerCase() !== String(clientUserId).toLowerCase()) {
+          return res.status(403).json({ success: false, error: "Access denied: Client cannot dispatch events for another subscriber." });
+        }
       }
 
       // Non-blocking async dispatch
@@ -5025,12 +5055,18 @@ ${clientContextText}
     }
   });
 
-  // 10. Incoming Telegram Webhook
+  // 10. Incoming Telegram Webhook with secret token verification
   app.post("/api/telegram/webhook", async (req, res) => {
     try {
+      const secretHeader = req.headers["x-telegram-bot-api-secret-token"] as string | undefined;
+      const isSecretValid = validateTelegramWebhookSecret(secretHeader);
+      if (!isSecretValid) {
+        return res.status(403).json({ success: false, error: "Unauthorized: Invalid Telegram webhook secret token" });
+      }
+
       const update = req.body;
       res.status(200).send("OK");
-      if (update) {
+      if (update && typeof update === "object") {
         await handleTelegramIncomingUpdate(update);
       }
     } catch (err: any) {
