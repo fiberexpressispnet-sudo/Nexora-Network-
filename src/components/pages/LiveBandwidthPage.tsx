@@ -297,6 +297,11 @@ export const LiveBandwidthPage: React.FC<LiveBandwidthPageProps> = ({
     };
   });
 
+  const onlineClientsCount = clientRows.filter((c) => c.status === 'online' || c.hasTraffic).length;
+  const totalClientDownMbps = parseFloat(clientRows.reduce((sum, c) => sum + (c.currentDown || 0), 0).toFixed(2));
+  const totalClientUpMbps = parseFloat(clientRows.reduce((sum, c) => sum + (c.currentUp || 0), 0).toFixed(2));
+  const totalClientBandwidthMbps = parseFloat((totalClientDownMbps + totalClientUpMbps).toFixed(2));
+
   const filteredClients = clientRows.filter(
     (c) =>
       (c.name || '').toLowerCase().includes(clientSearch.toLowerCase()) ||
@@ -395,11 +400,11 @@ export const LiveBandwidthPage: React.FC<LiveBandwidthPageProps> = ({
         </div>
       )}
 
-      {/* 4 Big Live Metric Cards (Real Values Only) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 font-mono">
+      {/* Live Metric Cards: Router Traffic + Active Client Totals */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 font-mono">
         <div className="bg-white border border-slate-200 rounded p-4 shadow-sm space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-800">
-            <span className="font-bold">Current Download (RX)</span>
+            <span className="font-bold">Router Download (RX)</span>
             <ArrowDownCircle className="w-4 h-4 text-emerald-500" />
           </div>
           <div className="text-2xl sm:text-3xl font-black text-emerald-600">
@@ -413,7 +418,7 @@ export const LiveBandwidthPage: React.FC<LiveBandwidthPageProps> = ({
 
         <div className="bg-white border border-slate-200 rounded p-4 shadow-sm space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-800">
-            <span className="font-bold">Current Upload (TX)</span>
+            <span className="font-bold">Router Upload (TX)</span>
             <ArrowUpCircle className="w-4 h-4 text-sky-500" />
           </div>
           <div className="text-2xl sm:text-3xl font-black text-sky-600">
@@ -427,34 +432,29 @@ export const LiveBandwidthPage: React.FC<LiveBandwidthPageProps> = ({
 
         <div className="bg-white border border-slate-200 rounded p-4 shadow-sm space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-800">
-            <span className="font-bold">Router API Latency</span>
-            <Zap className="w-4 h-4 text-amber-500" />
+            <span className="font-bold">Active Client Bandwidth</span>
+            <Activity className="w-4 h-4 text-indigo-500" />
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-amber-600">
-            {routerStatus === 'ONLINE' && currentMetrics.latency !== null ? (
-              <>
-                {currentMetrics.latency} <span className="text-xs font-bold text-slate-800">ms</span>
-              </>
-            ) : (
-              <span className="text-sm font-sans font-semibold text-slate-400">Unavailable</span>
-            )}
+          <div className="text-2xl sm:text-3xl font-black text-indigo-600">
+            {routerStatus === 'ONLINE' ? totalClientBandwidthMbps.toFixed(2) : '0.00'}{' '}
+            <span className="text-xs font-bold text-slate-800">Mbps</span>
           </div>
           <div className="text-[10px] text-slate-600">
-            {routerStatus === 'ONLINE' ? 'Real API Roundtrip' : 'Offline'}
+            {routerStatus === 'ONLINE' ? `RX: ${totalClientDownMbps}M | TX: ${totalClientUpMbps}M` : '0 Mbps active'}
           </div>
         </div>
 
         <div className="bg-white border border-slate-200 rounded p-4 shadow-sm space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-800">
-            <span className="font-bold">Total Active Throughput</span>
-            <TrendingUp className="w-4 h-4 text-purple-500" />
+            <span className="font-bold">Online Subscribers</span>
+            <Wifi className="w-4 h-4 text-purple-500" />
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-purple-600">
-            {routerStatus === 'ONLINE' ? (currentMetrics.download + currentMetrics.upload).toFixed(2) : '0.00'}{' '}
-            <span className="text-xs font-bold text-slate-800">Mbps</span>
+          <div className="text-2xl sm:text-3xl font-black text-purple-600 flex items-center gap-2">
+            <span>{onlineClientsCount}</span>
+            <span className="text-xs font-normal text-slate-500">/ {clients.length}</span>
           </div>
           <div className="text-[10px] text-slate-600">
-            {selectedInterface === 'all' ? 'Aggregate RouterOS Load' : `Interface: ${selectedInterface}`}
+            {routerStatus === 'ONLINE' && currentMetrics.latency !== null ? `API Latency: ${currentMetrics.latency}ms` : 'Router offline'}
           </div>
         </div>
       </div>

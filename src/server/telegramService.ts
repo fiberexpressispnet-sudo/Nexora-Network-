@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { encryptSecret, decryptSecret, OLTServerConfig, queryRealOltOnus } from './oltApi';
-import { sanitizeMikrotikHost } from './mikrotikApi';
+import { sanitizeMikrotikHost, fetchMikrotikTraffic, MikrotikConnParams, queryMikrotikSocket } from './mikrotikApi';
 
 export interface TelegramBotSettings {
   enabled: boolean;
@@ -950,11 +950,50 @@ export async function handleTelegramIncomingUpdate(update: any): Promise<void> {
     // Acknowledge callback immediately to remove loading spinner in Telegram client
     await callTelegramApi('answerCallbackQuery', { callback_query_id: queryId }).catch(() => {});
 
+    // Client self-care callbacks (available to authenticated linked clients)
+    if (data === 'my_bw' || data === 'live_bw' || data.startsWith('client_bw_')) {
+      const clientLinks = getClientLinks();
+      const linked = clientLinks.find((l) => l.chatId === chatId);
+      if (linked) {
+        await executeClientLiveBandwidthCheck(chatId, linked.userId);
+      } else {
+        await sendTelegramMessage(chatId, `⚠️ No linked subscriber account found for this Telegram chat. Use /start to link your account.`);
+      }
+      return;
+    }
+
+    if (data === 'my_onu') {
+      const clientLinks = getClientLinks();
+      const linked = clientLinks.find((l) => l.chatId === chatId);
+      if (linked) {
+        const realOnu = getRealOnuByUserId(linked.userId);
+        if (!realOnu) {
+          await sendTelegramMessage(chatId, `ℹ️ No OLT fiber terminal currently mapped to your line.`);
+          return;
+        }
+        const opticalMsg =
+          `<b>📶 Optical Fiber Health (My ONU)</b>\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `Status: <b>${realOnu.status === 'online' ? '🟢 Online (Signal Healthy)' : realOnu.status === 'los' ? '🚨 LOS (Fiber Break)' : '⚠️ Signal Weak'}</b>\n` +
+          `Optical RX Power: <b>${realOnu.rxPower !== null ? `${realOnu.rxPower.toFixed(1)} dBm` : 'N/A'}</b>\n` +
+          (realOnu.txPower ? `Optical TX Power: ${realOnu.txPower.toFixed(1)} dBm\n` : '') +
+          (realOnu.distanceMeters ? `Cable Distance: ${realOnu.distanceMeters} meters\n` : '') +
+          `Serial Number: <code>${realOnu.serialNumber}</code>`;
+        await sendTelegramMessage(chatId, opticalMsg);
+      }
+      return;
+    }
+
     const settings = getTelegramSettings();
     const isAdmin = settings.adminChatIds.includes(chatId);
 
     if (!isAdmin) {
       await sendTelegramMessage(chatId, `⛔ <b>Unauthorized:</b> Only authorized administrators can perform subscriber line actions.`);
+      return;
+    }
+
+    if (data === 'admin_traffic' || data === 'admin_bw') {
+      await executeAdminLiveTrafficCheck(chatId);
       return;
     }
 
@@ -1116,13 +1155,23 @@ export async function handleTelegramIncomingUpdate(update: any): Promise<void> {
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `Subscriber: <b>${escapeHtml(linkedClient.clientName)}</b> (<code>${escapeHtml(linkedClient.userId)}</code>)\n\n` +
         `<b>Available Commands:</b>\n` +
-        `• <b>/status</b> or <b>/myaccount</b> - Check subscription expiry\n` +
+        `• <b>/mybandwidth</b> or <b>/speed</b> - Live download & upload speed\n` +
+        `• <b>/status</b> or <b>/myaccount</b> - Subscription expiry & dues\n` +
         `• <b>/mypackage</b> - Active plan & bandwidth details\n` +
-        `• <b>/mypayments</b> - View your payment records\n` +
-        `• <b>/myonu</b> - Check your real fiber optical signal\n` +
-        `• <b>/unlink</b> - Unlink Telegram account`;
+        `• <b>/mypayments</b> - View recent payment history\n` +
+        `• <b>/myonu</b> - Check real optical fiber signal\n` +
+        `• <b>/unlink</b> - Disconnect Telegram account`;
 
-      await sendTelegramMessage(chatId, welcome);
+      await sendTelegramMessage(chatId, welcome, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '📊 Live Bandwidth', callback_data: 'my_bw' },
+              { text: '📶 Optical Signal', callback_data: 'my_onu' },
+            ],
+          ],
+        },
+      });
       return;
     }
 
@@ -1257,15 +1306,42 @@ export async function handleTelegramIncomingUpdate(update: any): Promise<void> {
       return;
     }
 
+    if (
+      command === '/mybandwidth' ||
+      command === '/speed' ||
+      command === '/bandwidth' ||
+      command === '/live_bandwidth' ||
+      command === '/livebandwidth' ||
+      command === '/speedtest' ||
+      text.toLowerCase().includes('live bandwidth') ||
+      text.toLowerCase().includes('bandwidth') ||
+      text.includes('ব্যান্ডউইথ') ||
+      text.includes('স্পিড')
+    ) {
+      await executeClientLiveBandwidthCheck(chatId, linkedClient.userId);
+      return;
+    }
+
     if (command === '/help') {
       await sendTelegramMessage(
         chatId,
-        `<b>📖 Subscriber Help Menu</b>\n` +
+        `<b>📖 Subscriber Self-Care Help Menu</b>\n` +
+        `• <b>/mybandwidth</b> or <b>/speed</b> - Live download & upload speed\n` +
         `• <b>/status</b> - Subscription & expiry status\n` +
         `• <b>/mypackage</b> - Current internet plan\n` +
         `• <b>/mypayments</b> - Past payment history\n` +
         `• <b>/myonu</b> - Live fiber optical signal\n` +
-        `• <b>/unlink</b> - Disconnect Telegram`
+        `• <b>/unlink</b> - Disconnect Telegram`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '📊 Live Bandwidth', callback_data: 'my_bw' },
+                { text: '📶 Optical Signal', callback_data: 'my_onu' },
+              ],
+            ],
+          },
+        }
       );
       return;
     }
@@ -1297,7 +1373,8 @@ export async function handleTelegramIncomingUpdate(update: any): Promise<void> {
       `• <code>/delete &lt;নাম/ফোন/আইডি&gt;</code> — ক্লায়েন্ট ডিলিট করুন\n\n` +
       `<b>🔍 সরাসরি সার্চ করার উপায়:</b>\n` +
       `• যে কারো <b>নাম</b> অথবা <b>ফোন নম্বর</b> লিখে সরাসরি মেসেজ পাঠালেই তার প্রোফাইল ও চালু/বন্ধ করার বাটন চলে আসবে!\n\n` +
-      `<b>📊 সিস্টেম মনিটরিং:</b>\n` +
+      `<b>📊 সিস্টেম মনিটরিং ও ট্রাফিক:</b>\n` +
+      `• <b>/traffic</b> বা <b>/bandwidth</b> — রাউটারের লাইভ ব্যান্ডউইথ (RX/TX Mbps)\n` +
       `• <b>/status</b> — সার্বিক নেটওয়ার্ক ওভারভিউ ও আজকের আয়\n` +
       `• <b>/clients</b> — সকল গ্রাহকের সারাংশ\n` +
       `• <b>/online</b> — বর্তমানে চালু গ্রাহকদের লিস্ট\n` +
@@ -1306,6 +1383,12 @@ export async function handleTelegramIncomingUpdate(update: any): Promise<void> {
       `• <b>/onu</b> — ONU সিগন্যাল ও RX Power (dBm)\n` +
       `• <b>/alerts</b> — লাইভ সিস্টেম অ্যালার্ট`;
     await sendTelegramMessage(chatId, helpMsg);
+    return;
+  }
+
+  // Handle Admin /traffic or /bandwidth or /bw
+  if (command === '/traffic' || command === '/bandwidth' || command === '/bw' || command === '/routerspeed' || command === '/live_traffic') {
+    await executeAdminLiveTrafficCheck(chatId);
     return;
   }
 
@@ -1900,6 +1983,252 @@ export async function executeAdminDeleteClient(chatId: string, query: string): P
     `The subscriber record has been completely removed from the database.`;
 
   await sendTelegramMessage(chatId, msg);
+}
+
+export async function executeClientLiveBandwidthCheck(chatId: string, userId: string): Promise<void> {
+  const client = getClientByUserId(userId);
+  if (!client) {
+    await sendTelegramMessage(chatId, `⚠️ <b>Client Record Not Found:</b> Unable to locate account details for <code>${escapeHtml(userId)}</code>.`);
+    return;
+  }
+
+  const routers: any[] = localDbRef['nexora_routers']?.value || [];
+  const targetRouter =
+    routers.find((r) => r.name === client.router || r.ip === client.router) ||
+    routers.find((r) => r.connected) ||
+    routers[0];
+
+  if (!targetRouter || !targetRouter.ip) {
+    await sendTelegramMessage(
+      chatId,
+      `<b>📊 Real-Time Live Bandwidth Check</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+      `👤 <b>Subscriber:</b> ${escapeHtml(client.name)} (<code>${escapeHtml(client.userId)}</code>)\n` +
+      `📦 <b>Package:</b> ${escapeHtml(client.package || 'Standard')} (${escapeHtml(client.downloadSpeed || client.bandwidth || 'N/A')})\n` +
+      `📶 <b>Status:</b> ${client.status === 'online' ? '🟢 Active' : '🔴 Expired/Offline'}\n\n` +
+      `⚠️ <i>No MikroTik gateway router configured for your line yet.</i>`
+    );
+    return;
+  }
+
+  const params: MikrotikConnParams = {
+    host: sanitizeMikrotikHost(targetRouter.ip),
+    port: Number(targetRouter.apiPort) || 8728,
+    username: String(targetRouter.username || 'admin').trim(),
+    password: targetRouter.password ? String(targetRouter.password).trim() : '',
+    timeoutMs: 4500,
+    useSsl: Number(targetRouter.apiPort) === 8729,
+    isDemo: Boolean(targetRouter.isDemo),
+  };
+
+  try {
+    // 1. Query real live traffic & queues
+    const trafficRes = await fetchMikrotikTraffic(params);
+    if (!trafficRes.success) {
+      await sendTelegramMessage(
+        chatId,
+        `<b>📊 Real-Time Live Bandwidth Check</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+        `👤 <b>Subscriber:</b> ${escapeHtml(client.name)} (<code>${escapeHtml(client.userId)}</code>)\n` +
+        `🌐 <b>Gateway Router:</b> ${escapeHtml(targetRouter.name)} (${escapeHtml(targetRouter.ip)})\n` +
+        `🔴 <b>Router Status:</b> Offline / Unreachable\n` +
+        `⚠️ <i>${escapeHtml(trafficRes.error || 'Router API timeout')}</i>`
+      );
+      return;
+    }
+
+    // 2. Find client's specific Simple Queue
+    const queues = trafficRes.queues || [];
+    const queueNameDirect = `nexora_${client.userId}`;
+    const matchedQueue = queues.find(
+      (q) =>
+        q.name === queueNameDirect ||
+        q.name === client.userId ||
+        (client.ip && q.target && q.target.includes(client.ip)) ||
+        (client.ipAddress && q.target && q.target.includes(client.ipAddress))
+    );
+
+    // 3. Query active PPP session for live uptime & active IP
+    let sessionUptime = '';
+    let activeIp = client.ip || client.ipAddress || '';
+    let callerId = '';
+    try {
+      const pppRes = await queryMikrotikSocket(params, ['/ppp/active/print']);
+      if (pppRes.success && pppRes.sentences) {
+        for (const sent of pppRes.sentences) {
+          let pppUser = '';
+          let pppUptime = '';
+          let pppAddress = '';
+          let pppCaller = '';
+          for (const w of sent) {
+            if (w.startsWith('=name=')) pppUser = w.substring(6);
+            if (w.startsWith('=uptime=')) pppUptime = w.substring(8);
+            if (w.startsWith('=address=')) pppAddress = w.substring(9);
+            if (w.startsWith('=caller-id=')) pppCaller = w.substring(11);
+          }
+          if (pppUser.toLowerCase() === client.userId.toLowerCase()) {
+            sessionUptime = pppUptime;
+            if (pppAddress) activeIp = pppAddress;
+            if (pppCaller) callerId = pppCaller;
+            break;
+          }
+        }
+      }
+    } catch {}
+
+    // Also check Hotspot active sessions if not found in PPPoE
+    if (!sessionUptime) {
+      try {
+        const hsRes = await queryMikrotikSocket(params, ['/ip/hotspot/active/print']);
+        if (hsRes.success && hsRes.sentences) {
+          for (const sent of hsRes.sentences) {
+            let hsUser = '';
+            let hsUptime = '';
+            let hsAddress = '';
+            let hsMac = '';
+            for (const w of sent) {
+              if (w.startsWith('=user=')) hsUser = w.substring(6);
+              if (w.startsWith('=uptime=')) hsUptime = w.substring(8);
+              if (w.startsWith('=address=')) hsAddress = w.substring(9);
+              if (w.startsWith('=mac-address=')) hsMac = w.substring(13);
+            }
+            if (hsUser.toLowerCase() === client.userId.toLowerCase()) {
+              sessionUptime = hsUptime;
+              if (hsAddress) activeIp = hsAddress;
+              if (hsMac) callerId = hsMac;
+              break;
+            }
+          }
+        }
+      } catch {}
+    }
+
+    const downMbps = matchedQueue ? Number(matchedQueue.rxMbps) || 0 : 0;
+    const upMbps = matchedQueue ? Number(matchedQueue.txMbps) || 0 : 0;
+    const isOnline = client.status === 'online' || Boolean(sessionUptime);
+
+    // Calculate saturation if package speed is available
+    const speedMatch = String(client.downloadSpeed || client.bandwidth || matchedQueue?.maxLimit || '').match(/(\d+)/);
+    const allocatedNum = speedMatch ? parseInt(speedMatch[1], 10) : 0;
+    const saturation = allocatedNum > 0 ? Math.min(100, Math.round((downMbps / allocatedNum) * 100)) : 0;
+
+    const msg =
+      `<b>📊 Real-Time Bandwidth & Session Telemetry</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `👤 <b>Subscriber:</b> ${escapeHtml(client.name)} (<code>${escapeHtml(client.userId)}</code>)\n` +
+      `📶 <b>Status:</b> ${isOnline ? '🟢 Connected (Online)' : '🔴 Disconnected (Offline)'}\n` +
+      (sessionUptime ? `⏱️ <b>Session Uptime:</b> <b>${escapeHtml(sessionUptime)}</b>\n` : '') +
+      (activeIp ? `🌐 <b>Assigned IP:</b> <code>${escapeHtml(activeIp)}</code>\n` : '') +
+      (callerId ? `🔖 <b>Caller MAC:</b> <code>${escapeHtml(callerId)}</code>\n` : '') +
+      `📦 <b>Plan Bandwidth:</b> ${escapeHtml(client.package || 'Standard')} (${escapeHtml(client.downloadSpeed || client.bandwidth || matchedQueue?.maxLimit || 'N/A')})\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `📥 <b>Live Download Speed:</b> <b>${downMbps.toFixed(2)} Mbps</b>\n` +
+      `📤 <b>Live Upload Speed:</b> <b>${upMbps.toFixed(2)} Mbps</b>\n` +
+      (allocatedNum > 0 ? `📊 <b>Bandwidth Saturation:</b> <b>${saturation}%</b>\n` : '') +
+      (matchedQueue ? `🏷️ <b>Simple Queue:</b> <code>${escapeHtml(matchedQueue.name)}</code>\n` : '') +
+      `⏰ <b>Measured At:</b> ${new Date().toLocaleTimeString()}`;
+
+    await sendTelegramMessage(chatId, msg, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🔄 Refresh Live Speed', callback_data: `my_bw` },
+            { text: '📶 Optical Signal', callback_data: `my_onu` },
+          ],
+        ],
+      },
+    });
+  } catch (err: any) {
+    await sendTelegramMessage(chatId, `⚠️ Failed to fetch live bandwidth from router: ${escapeHtml(err.message)}`);
+  }
+}
+
+export async function executeAdminLiveTrafficCheck(chatId: string): Promise<void> {
+  const routers: any[] = localDbRef['nexora_routers']?.value || [];
+  const clients: any[] = localDbRef['nexora_clients']?.value || [];
+  const targetRouter = routers.find((r) => r.connected) || routers[0];
+
+  if (!targetRouter || !targetRouter.ip) {
+    await sendTelegramMessage(
+      chatId,
+      `<b>📊 MikroTik Router Live Bandwidth</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+      `⚠️ <i>No MikroTik router currently configured or connected.</i>`
+    );
+    return;
+  }
+
+  const params: MikrotikConnParams = {
+    host: sanitizeMikrotikHost(targetRouter.ip),
+    port: Number(targetRouter.apiPort) || 8728,
+    username: String(targetRouter.username || 'admin').trim(),
+    password: targetRouter.password ? String(targetRouter.password).trim() : '',
+    timeoutMs: 5000,
+    useSsl: Number(targetRouter.apiPort) === 8729,
+    isDemo: Boolean(targetRouter.isDemo),
+  };
+
+  try {
+    const trafficRes = await fetchMikrotikTraffic(params);
+    if (!trafficRes.success) {
+      await sendTelegramMessage(
+        chatId,
+        `<b>📊 MikroTik Router Live Bandwidth</b>\n━━━━━━━━━━━━━━━━━━━━\n` +
+        `🌐 <b>Router:</b> ${escapeHtml(targetRouter.name)} (<code>${escapeHtml(targetRouter.ip)}</code>)\n` +
+        `🔴 <b>Status:</b> Offline / Unreachable\n` +
+        `⚠️ <i>${escapeHtml(trafficRes.error || 'Router API timeout')}</i>`
+      );
+      return;
+    }
+
+    const downMbps = (Number(trafficRes.totalRxBps) || 0) * 8 / 1_000_000;
+    const upMbps = (Number(trafficRes.totalTxBps) || 0) * 8 / 1_000_000;
+    const totalThroughput = downMbps + upMbps;
+
+    const queues = trafficRes.queues || [];
+    const activeQueuesWithTraffic = queues.filter((q) => (Number(q.rxMbps) || 0) > 0.05 || (Number(q.txMbps) || 0) > 0.05);
+
+    let totalClientDown = 0;
+    let totalClientUp = 0;
+    queues.forEach((q) => {
+      totalClientDown += Number(q.rxMbps) || 0;
+      totalClientUp += Number(q.txMbps) || 0;
+    });
+
+    const onlineClients = clients.filter((c) => c.status === 'online').length;
+
+    let msg =
+      `<b>📊 MikroTik Core Router - Real-Time Bandwidth</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `🌐 <b>Router:</b> <b>${escapeHtml(targetRouter.name)}</b> (<code>${escapeHtml(targetRouter.ip)}</code>)\n` +
+      `🟢 <b>Router Status:</b> Connected & Streaming\n` +
+      `👥 <b>Online Clients:</b> <b>${onlineClients}</b> subscribers\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `📥 <b>Total Download (RX):</b> <b>${downMbps.toFixed(2)} Mbps</b>\n` +
+      `📤 <b>Total Upload (TX):</b> <b>${upMbps.toFixed(2)} Mbps</b>\n` +
+      `⚡ <b>Aggregate Traffic:</b> <b>${totalThroughput.toFixed(2)} Mbps</b>\n` +
+      `👥 <b>Active Client Usage:</b> <b>${(totalClientDown + totalClientUp).toFixed(2)} Mbps</b>\n`;
+
+    if (activeQueuesWithTraffic.length > 0) {
+      msg += `\n<b>🔥 Top Active Subscriber Lines:</b>\n`;
+      activeQueuesWithTraffic.slice(0, 8).forEach((q) => {
+        const cleanName = q.name.replace(/^nexora_/, '');
+        msg += `• <code>${escapeHtml(cleanName)}</code>: 📥 ${Number(q.rxMbps).toFixed(2)}M / 📤 ${Number(q.txMbps).toFixed(2)}M\n`;
+      });
+    }
+
+    msg += `\n⏰ <i>Measured: ${new Date().toLocaleTimeString()}</i>`;
+
+    await sendTelegramMessage(chatId, msg, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🔄 Refresh Traffic', callback_data: 'admin_traffic' },
+            { text: '👥 Online Subscribers', callback_data: 'admin_online' },
+          ],
+        ],
+      },
+    });
+  } catch (err: any) {
+    await sendTelegramMessage(chatId, `⚠️ Failed to fetch router traffic: ${escapeHtml(err.message)}`);
+  }
 }
 
 function getClientByUserId(userId: string): any {

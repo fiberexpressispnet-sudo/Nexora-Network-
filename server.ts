@@ -2129,6 +2129,118 @@ async function startServer() {
     }
   });
 
+  // 11b. Authenticated Client Live Bandwidth Telemetry (Strictly Isolated by User ID)
+  app.get("/api/mikrotik/client-bandwidth", requireClientOrAdminAuth, async (req, res) => {
+    try {
+      const userRole = (req as any).userRole;
+      const clientUserId = (req as any).clientUserId;
+      const targetUserId = userRole === "client" ? clientUserId : (req.query.userId as string) || clientUserId;
+
+      if (!targetUserId) {
+        return res.status(400).json({ success: false, error: "userId is required" });
+      }
+
+      const clients: any[] = localDb["nexora_clients"]?.value || [];
+      const client = clients.find((c) => String(c.userId).toLowerCase() === String(targetUserId).toLowerCase());
+
+      if (!client) {
+        return res.status(404).json({ success: false, error: "Client not found in database" });
+      }
+
+      const routers: any[] = localDb["nexora_routers"]?.value || [];
+      const targetRouter =
+        routers.find((r) => r.name === client.router || r.ip === client.router) ||
+        routers.find((r) => r.connected) ||
+        routers[0];
+
+      if (!targetRouter || !targetRouter.ip) {
+        return res.json({
+          success: true,
+          status: client.status || "offline",
+          online: client.status === "online",
+          downloadMbps: 0,
+          uploadMbps: 0,
+          allocatedSpeed: client.downloadSpeed || client.bandwidth || "N/A",
+          routerName: "No Gateway",
+          message: "No MikroTik router configured for this subscriber line.",
+        });
+      }
+
+      const params: MikrotikConnParams = {
+        host: sanitizeMikrotikHost(targetRouter.ip),
+        port: Number(targetRouter.apiPort) || 8728,
+        username: String(targetRouter.username || "admin").trim(),
+        password: targetRouter.password ? String(targetRouter.password).trim() : "",
+        timeoutMs: 4000,
+        useSsl: Number(targetRouter.apiPort) === 8729,
+        isDemo: Boolean(targetRouter.isDemo),
+      };
+
+      const trafficRes = await fetchMikrotikTraffic(params);
+      let downMbps = 0;
+      let upMbps = 0;
+      let queueName = "";
+
+      if (trafficRes.success && trafficRes.queues) {
+        const queueNameDirect = `nexora_${client.userId}`;
+        const matchedQueue = trafficRes.queues.find(
+          (q) =>
+            q.name === queueNameDirect ||
+            q.name === client.userId ||
+            (client.ip && q.target && q.target.includes(client.ip)) ||
+            (client.ipAddress && q.target && q.target.includes(client.ipAddress))
+        );
+        if (matchedQueue) {
+          downMbps = Number(matchedQueue.rxMbps) || 0;
+          upMbps = Number(matchedQueue.txMbps) || 0;
+          queueName = matchedQueue.name;
+        }
+      }
+
+      // Query active session
+      let sessionUptime = "";
+      let activeIp = client.ip || client.ipAddress || "";
+      try {
+        const pppRes = await queryMikrotikSocket(params, ["/ppp/active/print"]);
+        if (pppRes.success && pppRes.sentences) {
+          for (const sent of pppRes.sentences) {
+            let pppUser = "";
+            let pppUptime = "";
+            let pppAddress = "";
+            for (const w of sent) {
+              if (w.startsWith("=name=")) pppUser = w.substring(6);
+              if (w.startsWith("=uptime=")) pppUptime = w.substring(8);
+              if (w.startsWith("=address=")) pppAddress = w.substring(9);
+            }
+            if (pppUser.toLowerCase() === client.userId.toLowerCase()) {
+              sessionUptime = pppUptime;
+              if (pppAddress) activeIp = pppAddress;
+              break;
+            }
+          }
+        }
+      } catch {}
+
+      res.json({
+        success: true,
+        userId: client.userId,
+        name: client.name,
+        online: client.status === "online" || Boolean(sessionUptime),
+        status: client.status || "offline",
+        downloadMbps: downMbps,
+        uploadMbps: upMbps,
+        sessionUptime: sessionUptime || null,
+        activeIp: activeIp || null,
+        allocatedSpeed: client.downloadSpeed || client.bandwidth || "N/A",
+        queueName: queueName || null,
+        routerName: targetRouter.name || targetRouter.ip,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // 12. MikroTik DNS Security & NAT Redirect Rules (REAL RouterOS API execution)
   app.post("/api/mikrotik/apply-dns", async (req, res) => {
     const {
