@@ -1,9 +1,38 @@
+import dotenv from "dotenv";
+dotenv.config({ override: true });
+
 import express from "express";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import {
+  setTelegramDbReference,
+  getTelegramSettings,
+  updateTelegramSettings,
+  saveTelegramBotToken,
+  getTelegramBotToken,
+  testTelegramBotConnection,
+  sendToAllAdmins,
+  sendTelegramMessage,
+  generateAdminPairingToken,
+  generateClientLinkingToken,
+  getClientLinks,
+  removeClientLinkByChatId,
+  notifyNewClientRegistration,
+  notifyNewPackageOrder,
+  notifyPaymentSubmitted,
+  notifyPaymentDecision,
+  notifyClientStatusChange,
+  notifyMikrotikAlert,
+  notifyOltAlert,
+  notifyOnuAlert,
+  notifySlowInternetAlert,
+  startTelegramPollingWorker,
+  handleTelegramIncomingUpdate,
+  dispatchAllDemoAlertsToAdmins,
+} from "./src/server/telegramService";
 import {
   queryMikrotikSocket,
   getSimulatedRouterOS6Info,
@@ -88,6 +117,30 @@ function saveDb() {
     fs.writeFileSync(DB_FILE, JSON.stringify(localDb, null, 2), "utf-8");
   } catch (err) {
     console.error("Local database save failure:", err);
+  }
+}
+
+// Connect Telegram Service to localDb
+setTelegramDbReference(localDb, saveDb);
+
+function logServerAudit(action: string, target: string, admin = "Server") {
+  try {
+    const logs: any[] = localDb["nexora_audit_logs"]?.value || [];
+    const newLog = {
+      id: `audit-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      admin,
+      action,
+      target,
+      time: new Date().toLocaleString(),
+      ip: "127.0.0.1",
+      result: "Success" as const,
+    };
+    logs.unshift(newLog);
+    if (logs.length > 200) logs.pop();
+    localDb["nexora_audit_logs"] = { value: logs, updatedAt: Date.now() };
+    saveDb();
+  } catch (e) {
+    // ignore
   }
 }
 
@@ -2616,6 +2669,33 @@ async function startServer() {
       saveDb();
       logServerAudit("CLIENT_ORDER_CREATED", `Client order created for ${cleanName} (${cleanPhone}) for package ${matchedPkg.name}`);
 
+      // Automated Real-Time Telegram Alerts
+      notifyNewClientRegistration({
+        name: newClient.name,
+        userId: newClient.userId,
+        phone: cleanPhone,
+        package: matchedPkg.name,
+        price: pkgPrice,
+        router: newClient.router,
+      }).catch(() => {});
+      notifyNewPackageOrder({
+        clientName: newClient.name,
+        phone: cleanPhone,
+        packageName: matchedPkg.name,
+        price: pkgPrice,
+        gateway: newOrder.paymentMethod,
+        transaction: cleanTrx,
+        userId: newClient.userId,
+      }).catch(() => {});
+      notifyPaymentSubmitted({
+        clientName: newClient.name,
+        userId: newClient.userId,
+        amount: pkgPrice,
+        package: matchedPkg.name,
+        paymentMethod: newOrder.paymentMethod,
+        transactionId: cleanTrx,
+      }).catch(() => {});
+
       res.json({ success: true, order: newOrder, client: newClient });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Failed to create order" });
@@ -2993,6 +3073,24 @@ async function startServer() {
       saveDb();
       logServerAudit("ORDER_APPROVED", `Approved order ${order.orderNumber} for client ${cleanUser}. MikroTik Verified: Success`);
 
+      // Non-blocking Telegram Alerts
+      notifyPaymentDecision({
+        status: "approved",
+        clientName: createdClient.name,
+        userId: createdClient.userId,
+        amount: Number(order.price) || 800,
+        package: order.packageName || createdClient.package,
+        transactionId: order.transactionId,
+        newExpiry: createdClient.expiryDate || createdClient.expiry,
+      }).catch(() => {});
+      notifyClientStatusChange({
+        userId: createdClient.userId,
+        name: createdClient.name,
+        status: "online",
+        package: createdClient.package,
+        expiry: createdClient.expiryDate || createdClient.expiry,
+      }).catch(() => {});
+
       res.json({
         success: true,
         message: "Order successfully approved, physical MikroTik account verified and provisioned, and payment recorded.",
@@ -3030,6 +3128,16 @@ async function startServer() {
       saveDb();
 
       logServerAudit("ORDER_REJECTED", `Rejected order ${order.orderNumber}. Reason: ${order.rejectedReason}`);
+
+      // Non-blocking Telegram Alert
+      notifyPaymentDecision({
+        status: "rejected",
+        clientName: order.clientName || order.userId,
+        userId: order.userId,
+        amount: Number(order.price) || 0,
+        transactionId: order.transactionId,
+        reason: order.rejectedReason,
+      }).catch(() => {});
 
       res.json({ success: true, message: "Order rejected", order });
     } catch (err: any) {
@@ -3259,6 +3367,24 @@ async function startServer() {
       saveDb();
       logServerAudit("RENEWAL_APPROVED", `Approved renewal for client ${renewal.userId}`);
 
+      // Non-blocking Telegram Alerts
+      notifyPaymentDecision({
+        status: "approved",
+        clientName: renewal.clientName || renewal.userId,
+        userId: renewal.userId,
+        amount: Number(renewal.amount || renewal.price) || 0,
+        package: renewal.package || updatedClient?.package,
+        transactionId: renewal.transactionId,
+        newExpiry: updatedClient?.expiryDate || updatedClient?.expiry,
+      }).catch(() => {});
+      notifyClientStatusChange({
+        userId: renewal.userId,
+        name: renewal.clientName || renewal.userId,
+        status: "online",
+        package: updatedClient?.package,
+        expiry: updatedClient?.expiryDate || updatedClient?.expiry,
+      }).catch(() => {});
+
       res.json({
         success: true,
         message: "Renewal request approved successfully and client line extended.",
@@ -3340,6 +3466,15 @@ async function startServer() {
           c.billingStatus = "unpaid";
           hasChanges = true;
 
+          // Notify subscriber and admin via Telegram
+          notifyClientStatusChange({
+            userId: c.userId,
+            name: c.name,
+            status: "expired",
+            package: c.package,
+            expiry: c.expiryDate,
+          }).catch(() => {});
+
           // Disable real MikroTik account and kick active session
           if (defaultRouter) {
             try {
@@ -3362,6 +3497,103 @@ async function startServer() {
       console.warn("Background expiry sweep warning:", bgErr);
     }
   }, 5 * 60 * 1000);
+
+  // Automated background network health monitor (MikroTik routers, OLTs, and ONU Optical Health)
+  setInterval(async () => {
+    try {
+      // 1. Check MikroTik Routers
+      const routersRecord = localDb["nexora_routers"];
+      const routersList: any[] = Array.isArray(routersRecord?.value) ? routersRecord.value : [];
+      for (const router of routersList) {
+        if (!router || router.isDemo) continue;
+        const resolvedParams = resolveRouterCredentials(router);
+        const cleanHost = resolvedParams.host;
+        if (cleanHost === "127.0.0.1" || cleanHost === "demo.mikrotik.local") continue;
+
+        try {
+          const res = await queryMikrotikSocketWithRetry(resolvedParams, ["/system/resource/print"], 1, 1500);
+          if (res.success && res.sentences?.length) {
+            if (router.status === "offline") {
+              router.status = "online";
+              router.connected = true;
+              notifyMikrotikAlert({ name: router.name, ip: router.ip || router.host, status: "online" }).catch(() => {});
+            }
+          } else {
+            if (router.status !== "offline") {
+              router.status = "offline";
+              router.connected = false;
+              notifyMikrotikAlert({
+                name: router.name,
+                ip: router.ip || router.host,
+                status: "offline",
+                error: res.error || "Connection timed out",
+              }).catch(() => {});
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 2. Check OLT Devices & Discovered ONUs
+      const oltsRecord = localDb["nexora_olts"];
+      const oltsList: OLTServerConfig[] = Array.isArray(oltsRecord?.value) ? oltsRecord.value : [];
+      const mappingsRecord = localDb["nexora_onu_mappings"];
+      const mappings: any[] = Array.isArray(mappingsRecord?.value) ? mappingsRecord.value : [];
+
+      for (const olt of oltsList) {
+        if (!olt || !olt.enabled) continue;
+        const port = olt.managementPort || 161;
+        const reachability = await checkSocketReachability(olt.ip, port, 2500);
+
+        if (reachability.reachable) {
+          if (olt.status === "offline") {
+            olt.status = "online";
+            notifyOltAlert({ name: olt.name, ip: olt.ip, brand: olt.brand, status: "online" }).catch(() => {});
+          }
+
+          // Query real ONUs to check optical power & fiber cuts
+          try {
+            const onus = await queryRealOltOnus(olt, true, undefined, mappings);
+            for (const onu of onus) {
+              if (onu.status === "los") {
+                notifyOnuAlert({
+                  serialNumber: onu.serialNumber,
+                  onuId: onu.id,
+                  clientName: onu.mappedClientName,
+                  userId: onu.mappedUserId,
+                  oltName: olt.name,
+                  alertType: "los",
+                  rxPower: onu.rxPower,
+                  distanceMeters: onu.distanceMeters,
+                }).catch(() => {});
+              } else if (onu.rxPower !== null && onu.rxPower !== undefined && onu.rxPower <= -25) {
+                notifyOnuAlert({
+                  serialNumber: onu.serialNumber,
+                  onuId: onu.id,
+                  clientName: onu.mappedClientName,
+                  userId: onu.mappedUserId,
+                  oltName: olt.name,
+                  alertType: "low_rx_power",
+                  rxPower: onu.rxPower,
+                  distanceMeters: onu.distanceMeters,
+                }).catch(() => {});
+              }
+            }
+          } catch (_) {}
+        } else {
+          if (olt.status !== "offline") {
+            olt.status = "offline";
+            notifyOltAlert({
+              name: olt.name,
+              ip: olt.ip,
+              brand: olt.brand,
+              status: "offline",
+              error: reachability.error || "Port 161 unreachable",
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (_) {}
+  }, 2 * 60 * 1000);
 
 
   // =========================================================================
@@ -4567,6 +4799,260 @@ ${clientContextText}
     }
   });
 
+  // =========================================================================
+  // 13. TELEGRAM BOT INTEGRATION & REAL-TIME ALERT APIS
+  // =========================================================================
+
+  // 1. Get Telegram Bot Settings (Public / Masked)
+  app.get("/api/telegram/settings", requireAdminAuth, (req, res) => {
+    try {
+      const settings = getTelegramSettings();
+      const hasToken = Boolean(getTelegramBotToken());
+      res.json({
+        success: true,
+        settings,
+        hasToken,
+        botUsername: settings.botUsername || process.env.TELEGRAM_BOT_USERNAME || 'NexoranetworkISPBot',
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 2. Save Telegram Bot Settings & optional Token
+  app.post("/api/telegram/settings", requireAdminAuth, (req, res) => {
+    try {
+      const { token, ...settingsUpdates } = req.body;
+      if (token && typeof token === 'string' && token.trim().length > 10 && token !== '••••••••') {
+        saveTelegramBotToken(token.trim());
+      }
+      const updated = updateTelegramSettings(settingsUpdates);
+      logServerAudit("TELEGRAM_SETTINGS_UPDATED", `Updated Telegram bot settings. Admin chat count: ${updated.adminChatIds.length}`);
+      res.json({
+        success: true,
+        message: "Telegram Bot settings saved successfully.",
+        settings: updated,
+        hasToken: Boolean(getTelegramBotToken()),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 3. Test Bot Connection
+  app.post("/api/telegram/test-connection", requireAdminAuth, async (req, res) => {
+    try {
+      const result = await testTelegramBotConnection();
+      if (result.success) {
+        res.json({
+          success: true,
+          message: `Bot authenticated successfully as @${result.botInfo?.username} (${result.botInfo?.first_name})`,
+          botInfo: result.botInfo,
+        });
+      } else {
+        res.json({
+          success: false,
+          error: result.error || "Failed to connect to Telegram Bot API",
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 4. Send Test Message to Admins
+  app.post("/api/telegram/send-test", requireAdminAuth, async (req, res) => {
+    try {
+      const settings = getTelegramSettings();
+      if (!settings.adminChatIds || settings.adminChatIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "No authorized Admin Telegram Chat IDs configured. Please link or add an Admin Chat ID first.",
+        });
+      }
+
+      const testMsg =
+        `<b>🔔 Nexora Network ISP - Telegram Bot Test Message</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `✅ Your Telegram Bot integration is working properly!\n` +
+        `🏢 System: <b>Nexora Network ISP</b>\n` +
+        `⏰ Timestamp: ${new Date().toLocaleString()}\n` +
+        `🚀 Ready to deliver instant network & billing alerts.`;
+
+      const sentCount = await sendToAllAdmins(testMsg);
+      if (sentCount > 0) {
+        res.json({
+          success: true,
+          message: `Test alert sent successfully to ${sentCount} authorized admin Telegram chat(s)!`,
+          sentCount,
+        });
+      } else {
+        res.json({
+          success: false,
+          error: "Failed to send test message. Please verify Admin Chat ID and ensure you have started the bot in Telegram.",
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 5. Generate Admin 1-Click Pairing Token
+  app.post("/api/telegram/generate-admin-pair-token", requireAdminAuth, (req, res) => {
+    try {
+      const pairData = generateAdminPairingToken();
+      res.json({
+        success: true,
+        token: pairData.token,
+        link: pairData.link,
+        expiresAt: pairData.expiresAt,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 6. Generate Client Linking Token
+  app.post("/api/telegram/generate-client-link-token", requireClientOrAdminAuth, (req, res) => {
+    try {
+      const { userId, clientName } = req.body;
+      const targetUserId = (req as any).userRole === "client" ? (req as any).clientUserId : userId;
+      if (!targetUserId) {
+        return res.status(400).json({ success: false, error: "userId is required to generate link token" });
+      }
+
+      const clients: any[] = localDb["nexora_clients"]?.value || [];
+      const client = clients.find((c) => String(c.userId).toLowerCase() === String(targetUserId).toLowerCase());
+      const name = client?.name || clientName || targetUserId;
+
+      const linkData = generateClientLinkingToken(targetUserId, name);
+      res.json({
+        success: true,
+        token: linkData.token,
+        link: linkData.link,
+        expiresAt: linkData.expiresAt,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 7. Check Client Telegram Link Status
+  app.get("/api/telegram/client-link-status", requireClientOrAdminAuth, (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || (req as any).clientUserId;
+      if (!userId) {
+        return res.status(400).json({ success: false, error: "userId parameter is required" });
+      }
+      const links = getClientLinks();
+      const match = links.find((l) => l.userId.toLowerCase() === String(userId).toLowerCase());
+      res.json({
+        success: true,
+        isLinked: Boolean(match),
+        linkDetails: match ? { linkedAt: match.linkedAt } : null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 8. Unlink Client Telegram
+  app.post("/api/telegram/unlink-client", requireClientOrAdminAuth, (req, res) => {
+    try {
+      const userId = req.body.userId || (req as any).clientUserId;
+      if (!userId) {
+        return res.status(400).json({ success: false, error: "userId is required" });
+      }
+      const links = getClientLinks().filter((l) => l.userId.toLowerCase() !== String(userId).toLowerCase());
+      localDb["nexora_telegram_client_links"] = { value: links, updatedAt: Date.now() };
+      saveDb();
+      res.json({ success: true, message: "Telegram account unlinked successfully." });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 9. Dispatch Event Notification Endpoint (Callable from frontend & server)
+  app.post("/api/telegram/notify", async (req, res) => {
+    try {
+      const { type, payload } = req.body;
+      if (!type || !payload) {
+        return res.status(400).json({ success: false, error: "Event type and payload are required" });
+      }
+
+      // Non-blocking async dispatch
+      (async () => {
+        try {
+          switch (type) {
+            case "NEW_CLIENT":
+              await notifyNewClientRegistration(payload);
+              break;
+            case "NEW_ORDER":
+              await notifyNewPackageOrder(payload);
+              break;
+            case "PAYMENT_SUBMITTED":
+              await notifyPaymentSubmitted(payload);
+              break;
+            case "PAYMENT_DECISION":
+              await notifyPaymentDecision(payload);
+              break;
+            case "CLIENT_STATUS":
+              await notifyClientStatusChange(payload);
+              break;
+            case "MIKROTIK_ALERT":
+              await notifyMikrotikAlert(payload);
+              break;
+            case "OLT_ALERT":
+              await notifyOltAlert(payload);
+              break;
+            case "ONU_ALERT":
+              await notifyOnuAlert(payload);
+              break;
+            case "SLOW_INTERNET":
+              await notifySlowInternetAlert(payload);
+              break;
+            default:
+              console.warn("Unknown Telegram notification event type:", type);
+          }
+        } catch (dispatchErr) {
+          console.error("Telegram notification dispatch error:", dispatchErr);
+        }
+      })();
+
+      res.json({ success: true, message: "Notification queued for dispatch." });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 10. Incoming Telegram Webhook
+  app.post("/api/telegram/webhook", async (req, res) => {
+    try {
+      const update = req.body;
+      res.status(200).send("OK");
+      if (update) {
+        await handleTelegramIncomingUpdate(update);
+      }
+    } catch (err: any) {
+      console.error("Error in Telegram webhook handler:", err);
+      res.status(200).send("OK");
+    }
+  });
+
+  // 11. Trigger Demo Alerts for all 11 triggers
+  app.post("/api/telegram/trigger-demo-alerts", requireAdminAuth, async (req, res) => {
+    try {
+      const result = await dispatchAllDemoAlertsToAdmins();
+      res.json({
+        success: true,
+        count: result.count,
+        message: `Successfully sent all 11 alerts to authorized Telegram admins!`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
@@ -4585,6 +5071,8 @@ ${clientContextText}
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
+    // Start Telegram Bot background update polling worker
+    startTelegramPollingWorker();
   });
 }
 

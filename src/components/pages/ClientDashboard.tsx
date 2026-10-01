@@ -38,7 +38,10 @@ import {
   Check,
   Smartphone,
   PhoneCall,
+  Bot,
+  ExternalLink,
 } from "lucide-react";
+import { generateClientLinkToken, checkClientLinkStatus, unlinkClientTelegram } from "../../lib/telegramClient";
 import { db } from "../../lib/firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { sanitizeForStorage } from "../../lib/storageUtils";
@@ -218,6 +221,51 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const [billingHistory, setBillingHistory] = useState<PaymentRecord[]>([]);
   const [selectedReceiptForPrint, setSelectedReceiptForPrint] =
     useState<PaymentRecord | null>(null);
+
+  // Telegram Bot One-Time Client Linking State
+  const [telegramLinkStatus, setTelegramLinkStatus] = useState<{ isLinked: boolean; linkedAt?: string } | null>(null);
+  const [isGeneratingClientLink, setIsGeneratingClientLink] = useState(false);
+  const [clientTelegramLinkData, setClientTelegramLinkData] = useState<{ link: string; token: string } | null>(null);
+  const [copiedClientLink, setCopiedClientLink] = useState(false);
+  const [isUnlinkingTelegram, setIsUnlinkingTelegram] = useState(false);
+  const [telegramActionNotice, setTelegramActionNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeClient?.userId) {
+      checkClientLinkStatus(activeClient.userId).then((res) => {
+        if (res.success) {
+          setTelegramLinkStatus({ isLinked: res.isLinked, linkedAt: res.linkDetails?.linkedAt });
+        }
+      });
+    }
+  }, [activeClient?.userId]);
+
+  const handleGenerateTelegramLink = async () => {
+    if (!activeClient?.userId) return;
+    setIsGeneratingClientLink(true);
+    setTelegramActionNotice(null);
+    const res = await generateClientLinkToken(activeClient.userId, activeClient.name || activeClient.userId);
+    setIsGeneratingClientLink(false);
+    if (res.success && res.link && res.token) {
+      setClientTelegramLinkData({ link: res.link, token: res.token });
+    } else {
+      setTelegramActionNotice(res.error || 'Failed to generate linking token');
+    }
+  };
+
+  const handleUnlinkTelegram = async () => {
+    if (!activeClient?.userId) return;
+    setIsUnlinkingTelegram(true);
+    const res = await unlinkClientTelegram(activeClient.userId);
+    setIsUnlinkingTelegram(false);
+    if (res.success) {
+      setTelegramLinkStatus({ isLinked: false });
+      setClientTelegramLinkData(null);
+      setTelegramActionNotice('Telegram account unlinked successfully.');
+    } else {
+      setTelegramActionNotice(res.error || 'Failed to unlink Telegram');
+    }
+  };
 
   // Sync client real-time from both zero-quota server database and Firestore
   useEffect(() => {
@@ -1543,6 +1591,120 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
                     <span>{autoFixSuccessMsg}</span>
                   </div>
                 )}
+
+                {/* Telegram Self-Care & Instant Alerts Box */}
+                <div className="bg-white rounded-[24px] p-5 shadow-sm border border-slate-100 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 bg-sky-50 text-sky-600 rounded-2xl border border-sky-100">
+                        <Bot className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                          <span>Telegram Bot Self-Care &amp; Alerts</span>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              telegramLinkStatus?.isLinked
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}
+                          >
+                            {telegramLinkStatus?.isLinked ? 'Connected 🟢' : 'Not Connected'}
+                          </span>
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Receive payment receipts, expiry warnings, and check live fiber optical signal on Telegram.
+                        </p>
+                      </div>
+                    </div>
+
+                    {telegramLinkStatus?.isLinked ? (
+                      <button
+                        type="button"
+                        onClick={handleUnlinkTelegram}
+                        disabled={isUnlinkingTelegram}
+                        className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold transition-all cursor-pointer self-start sm:self-auto"
+                      >
+                        {isUnlinkingTelegram ? 'Unlinking...' : 'Disconnect Telegram'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleGenerateTelegramLink}
+                        disabled={isGeneratingClientLink}
+                        className="px-4 py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:brightness-105 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>{isGeneratingClientLink ? 'Generating...' : 'Link with Telegram'}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {telegramActionNotice && (
+                    <div className="p-3 bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs">
+                      {telegramActionNotice}
+                    </div>
+                  )}
+
+                  {clientTelegramLinkData && !telegramLinkStatus?.isLinked && (
+                    <div className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-2xl space-y-3 animate-in fade-in">
+                      <div className="text-xs font-bold text-indigo-950 flex items-center justify-between">
+                        <span>Tap button below to open Bot in Telegram or copy command:</span>
+                        <span className="text-[10px] text-indigo-600 bg-white px-2 py-0.5 rounded font-bold">Valid for 30 mins</span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <a
+                          href={clientTelegramLinkData.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer transition-all"
+                        >
+                          <Bot className="w-3.5 h-3.5" />
+                          <span>Open in Telegram (@NexoranetworkISPBot)</span>
+                        </a>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`/link ${clientTelegramLinkData.token}`);
+                            setCopiedClientLink(true);
+                            setTimeout(() => setCopiedClientLink(false), 2000);
+                          }}
+                          className="px-3 py-2 bg-white hover:bg-slate-50 border border-indigo-200 text-indigo-900 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          {copiedClientLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedClientLink ? 'Copied Command!' : 'Copy /link command'}</span>
+                        </button>
+                      </div>
+
+                      <p className="text-[11px] text-indigo-800">
+                        Once you send <code>/start</code> in the bot, your account will be linked automatically.
+                      </p>
+                    </div>
+                  )}
+
+                  {telegramLinkStatus?.isLinked && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="font-mono font-bold text-sky-700 block">/status</span>
+                        <span className="text-[10px] text-slate-500">Subscription &amp; balance</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="font-mono font-bold text-indigo-700 block">/mypackage</span>
+                        <span className="text-[10px] text-slate-500">Speed &amp; plan details</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="font-mono font-bold text-emerald-700 block">/mypayments</span>
+                        <span className="text-[10px] text-slate-500">Payment receipt history</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="font-mono font-bold text-teal-700 block">/myonu</span>
+                        <span className="text-[10px] text-slate-500">Live fiber optical RX/TX</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* Countdown remaining card */}
                 <div className="bg-[#1a2332] text-white p-6 rounded-[28px] shadow-lg flex flex-col items-center space-y-4 relative overflow-hidden">
