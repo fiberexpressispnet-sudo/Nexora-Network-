@@ -114,6 +114,10 @@ import { ImportWizard } from "./components/flowforge/ImportWizard";
 import { TownViewModal } from "./components/flowforge/TownViewModal";
 import { sanitizeForStorage } from "./lib/storageUtils";
 import { getAdminHeaders, adminFetch } from "./lib/apiClient";
+import {
+  playNotificationChime,
+  triggerBrowserPushNotification,
+} from "./lib/notificationEngine";
 
 const writeTimeouts: Record<string, any> = {};
 const firstTimeInitAttempted = new Set<string>();
@@ -512,6 +516,58 @@ export function MainApp({
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [canAutoGenerateInvoices, setCanAutoGenerateInvoices] = useState(false);
+  const lastSeenNotifIdRef = useRef<number | null>(null);
+
+  const pushSystemNotification = (
+    text: string,
+    icon: string = "🔔",
+    soundVariant: "info" | "success" | "warning" | "urgent" = "info",
+  ) => {
+    const newId = Date.now() + Math.floor(Math.random() * 10000);
+    const timeStr = new Date().toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+    const newNotif: NotificationItem = {
+      id: newId,
+      icon,
+      text,
+      time: timeStr,
+      read: false,
+    };
+    lastSeenNotifIdRef.current = newId;
+    setNotifications((prev) => [newNotif, ...prev.slice(0, 99)]);
+    playNotificationChime(soundVariant);
+    triggerBrowserPushNotification(
+      settings?.companyName || "Nexora Network ISP Alert",
+      text,
+      `notif-${newId}`,
+    );
+  };
+
+  // Detect new notifications arriving from remote clients / backend in real-time
+  useEffect(() => {
+    if (!notifications || notifications.length === 0) return;
+    const newest = notifications[0];
+    if (!newest) return;
+
+    if (lastSeenNotifIdRef.current === null) {
+      lastSeenNotifIdRef.current = newest.id;
+      return;
+    }
+
+    if (newest.id !== lastSeenNotifIdRef.current && !newest.read) {
+      lastSeenNotifIdRef.current = newest.id;
+      playNotificationChime("urgent");
+      triggerBrowserPushNotification(
+        settings?.companyName || "Nexora Network ISP Alert",
+        newest.text,
+        `notif-${newest.id}`,
+      );
+      showToast(newest.text, "info");
+    }
+  }, [notifications]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -814,6 +870,11 @@ export function MainApp({
       "Approve Online Order",
       `Approved ${order.orderNumber} for ${order.clientName} (TrxID: ${order.transactionId})`,
     );
+    pushSystemNotification(
+      `✅ Package Order Approved: ${order.clientName} (${order.userId}) — ${order.packageName} [৳${order.price}] (TrxID: ${order.transactionId}) is now ACTIVE!`,
+      "CreditCard",
+      "success",
+    );
     showToast(
       `✅ ${order.clientName} এর প্যাকেজ অনুমোদন করা হয়েছে ও মাইক্রোটিকে এক্টিভ হয়েছে!`,
       "success",
@@ -847,6 +908,11 @@ export function MainApp({
     addAuditLog(
       "Reject Online Order",
       `Rejected ${order.orderNumber} (${order.clientName})`,
+    );
+    pushSystemNotification(
+      `❌ Package Order Rejected: ${order.clientName} (${order.userId}) — Order #${order.orderNumber} (TrxID: ${order.transactionId})`,
+      "AlertTriangle",
+      "warning",
     );
     showToast(
       `প্যাকেজ ক্রয় রিকোয়েস্ট (${order.orderNumber}) বাতিল করা হয়েছে।`,
@@ -1494,6 +1560,11 @@ export function MainApp({
   const handleAddClient = (client: Client) => {
     setClients((prev) => [client, ...prev]);
     addAuditLog("Create Client", client.name);
+    pushSystemNotification(
+      `👤 New Client Registered: ${client.name} (${client.userId}) • Phone: ${client.phone} • Package: ${client.package} [৳${client.price || "500"}]`,
+      "UserPlus",
+      "success",
+    );
     syncClientToMikrotik(client);
   };
 
@@ -1635,6 +1706,11 @@ export function MainApp({
 
     setClients((prev) => prev.map((c) => (c.id === id ? updatedClient : c)));
     addAuditLog("Renew Subscription", id);
+    pushSystemNotification(
+      `✅ Subscription Renewed: ${targetClient.name} (${targetClient.userId}) — Package: ${targetClient.package}${amount ? ` • Paid: ৳${amount}` : ""} • Valid till ${newExp}`,
+      "CreditCard",
+      "success",
+    );
     syncClientToMikrotik(updatedClient);
   };
 
@@ -1726,6 +1802,11 @@ export function MainApp({
     addAuditLog(
       "Toggle Client Status",
       `${updatedClient.name} (${updatedClient.userId}) -> ${newStatus.toUpperCase()}`,
+    );
+    pushSystemNotification(
+      `${newStatus === "online" ? "🟢" : "🔴"} Subscriber Status Alert: ${updatedClient.name} (${updatedClient.userId}) line is now ${newStatus.toUpperCase()}`,
+      "Wifi",
+      newStatus === "online" ? "success" : "warning",
     );
 
     showToast(
@@ -2394,6 +2475,11 @@ export function MainApp({
         `Renewal approved! Client ${targetClient.name} is now ONLINE.`,
         "success",
       );
+      pushSystemNotification(
+        `✅ Renewal Payment Approved: ${targetClient.name} (${targetClient.userId}) — Package: ${targetReq.requestedPackage} [৳${targetReq.price}] • TrxID: ${targetReq.transactionId} • Valid till ${newExp}`,
+        "CreditCard",
+        "success",
+      );
       addAuditLog("Approve Broadband Renewal", targetClient.name);
     } else {
       showToast(`Error: Client not found for renewal`, "error");
@@ -2405,9 +2491,17 @@ export function MainApp({
   };
 
   const handleRejectBroadbandRenewal = (reqId: string) => {
+    const targetReq = renewalRequests.find((r) => r.id === reqId);
     setRenewalRequests((prev) =>
       prev.map((r) => (r.id === reqId ? { ...r, status: "rejected" } : r)),
     );
+    if (targetReq) {
+      pushSystemNotification(
+        `❌ Renewal Payment Rejected: ${targetReq.clientName} (${targetReq.userId}) — Amount: ৳${targetReq.price} (TrxID: ${targetReq.transactionId})`,
+        "AlertTriangle",
+        "warning",
+      );
+    }
     showToast("Broadband renewal request rejected", "warning");
     addAuditLog("Reject Broadband Renewal", reqId);
   };
@@ -2487,6 +2581,9 @@ export function MainApp({
           onNavigate={handleNavigate}
           onGoBack={handleGoBack}
           unreadCount={unreadNotificationsCount}
+          notifications={notifications}
+          onMarkAllRead={handleMarkAllNotificationsRead}
+          onToggleRead={handleToggleNotificationRead}
           isDark={isDark}
           onToggleTheme={() => setIsDark(!isDark)}
           settings={settings}
@@ -2540,6 +2637,11 @@ export function MainApp({
               <Dashboard
                 clients={clients}
                 payments={payments}
+                invoices={invoices}
+                routers={routers}
+                adminProfile={adminProfile}
+                isDark={isDark}
+                onToggleTheme={() => setIsDark(!isDark)}
                 hotspotUsers={hotspotUsers}
                 hotspotRequests={hotspotRequests}
                 onlineOrders={onlineOrders}

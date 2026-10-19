@@ -56,6 +56,15 @@ export interface Client {
   priority?: string;
   daysProfileId?: number;
   bandwidthProfileId?: number;
+  email?: string;
+  address?: string;
+  createdAt?: string;
+  ip?: string;
+  ipAddress?: string;
+  mac?: string;
+  macAddress?: string;
+  connectionType?: string;
+  lastSync?: string;
 }
 
 export interface Package {

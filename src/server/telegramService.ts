@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { encryptSecret, decryptSecret, OLTServerConfig, queryRealOltOnus } from './oltApi';
-import { sanitizeMikrotikHost, fetchMikrotikTraffic, MikrotikConnParams, queryMikrotikSocket } from './mikrotikApi';
+import { sanitizeMikrotikHost, fetchMikrotikTraffic, MikrotikConnParams, queryMikrotikSocket, setMikrotikClientStatus } from './mikrotikApi';
 
 export interface TelegramBotSettings {
   enabled: boolean;
@@ -342,21 +342,38 @@ export async function sendToClient(
 }
 
 /**
- * Checks whether a notification should be skipped due to recent deduplication
+ * Checks whether a notification should be skipped due to recent deduplication (Strict Single Notification)
  */
-function shouldThrottleNotification(key: string, cooldownMs = 600000): boolean {
+function shouldThrottleNotification(key: string, cooldownMs = 3600000): boolean {
   const now = Date.now();
-  const lastSent = notificationDeduplicationMap.get(key);
-  if (lastSent && now - lastSent < cooldownMs) {
-    return true; // Throttle duplicate
-  }
-  notificationDeduplicationMap.set(key, now);
-  // Cleanup old keys
-  if (notificationDeduplicationMap.size > 1000) {
-    for (const [k, v] of notificationDeduplicationMap.entries()) {
-      if (now - v > cooldownMs * 2) notificationDeduplicationMap.delete(k);
+  const sentMap = localDbRef['nexora_telegram_sent_notifs']?.value || {};
+  
+  if (sentMap[key]) {
+    // 2 hour persistent cooldown per unique event key
+    if (now - sentMap[key] < Math.max(cooldownMs, 7200000)) {
+      return true; // Throttle duplicate
     }
   }
+
+  const lastSent = notificationDeduplicationMap.get(key);
+  if (lastSent && now - lastSent < cooldownMs) {
+    return true;
+  }
+
+  notificationDeduplicationMap.set(key, now);
+  sentMap[key] = now;
+
+  // Cleanup old persistent entries (> 24 hours)
+  for (const k of Object.keys(sentMap)) {
+    if (now - sentMap[k] > 86400000) delete sentMap[k];
+  }
+
+  localDbRef['nexora_telegram_sent_notifs'] = {
+    value: sentMap,
+    updatedAt: now,
+  };
+  saveDbCallback();
+
   return false;
 }
 
@@ -443,17 +460,32 @@ export async function notifyNewClientRegistration(client: {
   const dedupKey = `new_client_${client.userId}`;
   if (shouldThrottleNotification(dedupKey, 60000)) return;
 
+  const targetQuery = client.userId || client.phone || '';
   const text =
-    `<b>🆕 New Subscriber Registered</b>\n` +
+    `<b>🆕 নতুন গ্রাহক রেজিস্ট্রেশন (New Registration)</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
-    `👤 <b>Name:</b> ${escapeHtml(client.name)}\n` +
-    `🆔 <b>User ID:</b> <code>${escapeHtml(client.userId)}</code>\n` +
-    `📦 <b>Package:</b> ${escapeHtml(client.package)} (৳${client.price || 'N/A'})\n` +
-    `📞 <b>Phone:</b> ${escapeHtml(client.phone || 'N/A')}\n` +
-    `🌐 <b>Router:</b> ${escapeHtml(client.router || 'Core')}\n` +
-    `⏰ <b>Registered:</b> ${new Date().toLocaleString()}`;
+    `👤 <b>গ্রাহকের নাম:</b> ${escapeHtml(client.name)}\n` +
+    `🆔 <b>ইউজার আইডি:</b> <code>${escapeHtml(client.userId)}</code>\n` +
+    `📞 <b>ফোন নম্বর:</b> <code>${escapeHtml(client.phone || 'N/A')}</code>\n` +
+    `📦 <b>প্যাকেজ:</b> ${escapeHtml(client.package)} (৳${client.price || 'N/A'})\n` +
+    `🌐 <b>রাউটার:</b> ${escapeHtml(client.router || 'Core Router')}\n` +
+    `⏰ <b>রেজিস্ট্রেশন সময়:</b> ${new Date().toLocaleString()}\n\n` +
+    `⚡ <i>টেলিগ্রাম থেকেই নিচের বাটনে ক্লিক করে সরাসরি লাইন চালু ও সক্রিয় করুন:</i>`;
 
-  await sendToAllAdmins(text);
+  await sendToAllAdmins(text, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '🟢 অনুমোদন ও লাইন চালু (Activate)', callback_data: `act_${targetQuery}` },
+          { text: '🔴 বাতিল করুন', callback_data: `deact_${targetQuery}` },
+        ],
+        [
+          { text: '📅 মেয়াদ +৩০ দিন বাড়ান', callback_data: `ext_${targetQuery}` },
+          { text: '🔍 বিস্তারিত প্রোফাইল', callback_data: `search_${targetQuery}` },
+        ],
+      ],
+    },
+  });
 }
 
 /**
@@ -471,18 +503,34 @@ export async function notifyNewPackageOrder(order: {
   const settings = getTelegramSettings();
   if (!settings.enabled || !settings.notifyNewOrder) return;
 
+  const targetQuery = order.userId || order.phone || '';
   const text =
-    `<b>📦 New Package Order Submitted</b>\n` +
+    `<b>📦 নতুন প্যাকেজ অর্ডার (New Order)</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
-    `👤 <b>Subscriber:</b> ${escapeHtml(order.clientName)}\n` +
-    `📦 <b>Package:</b> ${escapeHtml(order.packageName)}\n` +
-    `💰 <b>Amount:</b> ৳${order.price}\n` +
-    `💳 <b>Gateway:</b> ${escapeHtml(order.gateway || 'Manual/Portal')}\n` +
+    `👤 <b>গ্রাহক:</b> ${escapeHtml(order.clientName)}\n` +
+    (order.userId ? `🆔 <b>ইউজার আইডি:</b> <code>${escapeHtml(order.userId)}</code>\n` : '') +
+    (order.phone ? `📞 <b>ফোন:</b> <code>${escapeHtml(order.phone)}</code>\n` : '') +
+    `📦 <b>প্যাকেজ:</b> ${escapeHtml(order.packageName)}\n` +
+    `💰 <b>মূল্য:</b> ৳${order.price}\n` +
+    `💳 <b>পেমেন্ট মাধ্যম:</b> ${escapeHtml(order.gateway || 'Manual/Portal')}\n` +
     (order.transaction ? `🔖 <b>TrxID:</b> <code>${escapeHtml(order.transaction)}</code>\n` : '') +
-    `⏰ <b>Order Time:</b> ${new Date().toLocaleString()}\n\n` +
-    `<i>⚡ Review and approve from Admin Billing Panel.</i>`;
+    `⏰ <b>অর্ডার সময়:</b> ${new Date().toLocaleString()}\n\n` +
+    `⚡ <i>টেলিগ্রাম থেকেই অনুমোদন ও লাইন চালু করতে বাটনে চাপ দিন:</i>`;
 
-  await sendToAllAdmins(text);
+  await sendToAllAdmins(text, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '🟢 অনুমোদন ও লাইন চালু (Activate)', callback_data: `act_${targetQuery}` },
+          { text: '🔴 অর্ডার বাতিল', callback_data: `deact_${targetQuery}` },
+        ],
+        [
+          { text: '📅 মেয়াদ +৩০ দিন বাড়ান', callback_data: `ext_${targetQuery}` },
+          { text: '🔍 বিস্তারিত দেখুন', callback_data: `search_${targetQuery}` },
+        ],
+      ],
+    },
+  });
 }
 
 /**
@@ -504,18 +552,31 @@ export async function notifyPaymentSubmitted(payment: {
   if (shouldThrottleNotification(dedupKey, 60000)) return;
 
   const text =
-    `<b>💳 Payment Submitted for Verification</b>\n` +
+    `<b>💳 পেমেন্ট ভেরিফিকেশন রিকোয়েস্ট (Payment Submitted)</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
-    `👤 <b>Subscriber:</b> ${escapeHtml(payment.clientName)}\n` +
-    `🆔 <b>User ID:</b> <code>${escapeHtml(payment.userId)}</code>\n` +
-    `💰 <b>Amount:</b> ৳${payment.amount}\n` +
-    `🏦 <b>Method:</b> ${escapeHtml(payment.paymentMethod)}\n` +
+    `👤 <b>গ্রাহক:</b> ${escapeHtml(payment.clientName)}\n` +
+    `🆔 <b>ইউজার আইডি:</b> <code>${escapeHtml(payment.userId)}</code>\n` +
+    `💰 <b>টাকার পরিমাণ:</b> ৳${payment.amount}\n` +
+    `🏦 <b>পদ্ধতি:</b> ${escapeHtml(payment.paymentMethod)}\n` +
     `🔖 <b>TrxID:</b> <code>${escapeHtml(payment.transactionId || 'None')}</code>\n` +
-    (payment.package ? `📦 <b>Plan:</b> ${escapeHtml(payment.package)}\n` : '') +
-    `🕒 <b>Submitted:</b> ${new Date().toLocaleString()}\n` +
-    `⚠️ <b>Status:</b> <b>Pending Manual Verification</b>`;
+    (payment.package ? `📦 <b>প্যাকেজ:</b> ${escapeHtml(payment.package)}\n` : '') +
+    `🕒 <b>সাবমিট সময়:</b> ${new Date().toLocaleString()}\n` +
+    `⚠️ <b>স্ট্যাটাস:</b> <b>যাচাই অপেক্ষমান (Pending Verification)</b>\n\n` +
+    `⚡ <i>টেলিগ্রাম থেকেই এক ক্লিকে অনুমোদন ও রিনিউ করুন:</i>`;
 
-  await sendToAllAdmins(text);
+  await sendToAllAdmins(text, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '🟢 অনুমোদন ও লাইন চালু (Approve & Activate)', callback_data: `act_${payment.userId}` },
+        ],
+        [
+          { text: '📅 মেয়াদ +৩০ দিন বাড়ান', callback_data: `ext_${payment.userId}` },
+          { text: '🔍 ক্লায়েন্ট বিস্তারিত', callback_data: `search_${payment.userId}` },
+        ],
+      ],
+    },
+  });
 }
 
 /**
@@ -779,6 +840,51 @@ export async function notifySlowInternetAlert(alert: {
   await sendToAllAdmins(text);
 }
 
+/**
+ * 10. Client Support Ticket / Line Complaint Notification
+ */
+export async function notifySupportTicket(ticket: {
+  clientName: string;
+  userId: string;
+  phone?: string;
+  category: string;
+  priority: string;
+  subject: string;
+  description: string;
+  location?: string;
+}): Promise<void> {
+  const settings = getTelegramSettings();
+  if (!settings.enabled) return;
+
+  const dedupKey = `support_ticket_${ticket.userId}_${ticket.subject}`;
+  if (shouldThrottleNotification(dedupKey, 60000)) return;
+
+  const icon = ticket.priority === 'Urgent' ? '🚨' : '🎫';
+  const text =
+    `<b>${icon} নতুন ক্লায়েন্ট সাপোর্ট রিপোর্ট (Support Ticket / Complaint)</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `👤 <b>গ্রাহক:</b> ${escapeHtml(ticket.clientName)}\n` +
+    `🆔 <b>ইউজার আইডি:</b> <code>${escapeHtml(ticket.userId)}</code>\n` +
+    `📞 <b>ফোন:</b> <code>${escapeHtml(ticket.phone || 'N/A')}</code>\n` +
+    `📌 <b>ক্যাটাগরি:</b> ${escapeHtml(ticket.category)} (${escapeHtml(ticket.priority)})\n` +
+    `💬 <b>বিষয়:</b> ${escapeHtml(ticket.subject)}\n` +
+    `📝 <b>বিবরণ:</b> ${escapeHtml(ticket.description)}\n` +
+    (ticket.location ? `🌐 <b>লোকেশন/রাউটার:</b> ${escapeHtml(ticket.location)}\n` : '') +
+    `⏰ <b>সময়:</b> ${new Date().toLocaleString()}\n\n` +
+    `⚡ <i>টেলিগ্রাম থেকেই সরাসরি কাস্টমারকে কল বা সমাধান করুন।</i>`;
+
+  await sendToAllAdmins(text, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '📞 কল করুন (Call)', url: `tel:${ticket.phone}` },
+          { text: '🔍 ক্লায়েন্ট প্রোফাইল', callback_data: `search_${ticket.userId}` },
+        ],
+      ],
+    },
+  });
+}
+
 // =========================================================================
 // TELEGRAM INCOMING COMMAND PROCESSOR
 // =========================================================================
@@ -1018,6 +1124,41 @@ export async function handleTelegramIncomingUpdate(update: any): Promise<void> {
     if (data.startsWith('del_')) {
       const targetUserId = data.slice(4);
       await executeAdminDeleteClient(chatId, targetUserId);
+      return;
+    }
+
+    if (data.startsWith('search_') || data.startsWith('view_')) {
+      const targetUserId = data.slice(data.indexOf('_') + 1);
+      const client = findClientByQuery(targetUserId);
+      if (!client) {
+        await sendTelegramMessage(chatId, `❌ <b>গ্রাহক পাওয়া যায়নি:</b> "<code>${escapeHtml(targetUserId)}</code>"`);
+        return;
+      }
+      const isOnline = client.status === 'online';
+      const realOnu = getRealOnuByUserId(client.userId);
+      const cardText =
+        `👤 <b>গ্রাহকের নাম:</b> ${escapeHtml(client.name)} (<code>${escapeHtml(client.userId)}</code>)\n` +
+        `📞 <b>ফোন নম্বর:</b> <code>${escapeHtml(client.phone || 'N/A')}</code>\n` +
+        `📦 <b>প্যাকেজ:</b> ${escapeHtml(client.package || 'N/A')} (${escapeHtml(client.downloadSpeed || client.bandwidth || 'N/A')})\n` +
+        `📶 <b>স্ট্যাটাস:</b> ${isOnline ? '🟢 চালু (Online)' : '🔴 বন্ধ (Offline/Pending)'}\n` +
+        `📅 <b>মেয়াদ শেষ:</b> <b>${escapeHtml(client.expiry || 'N/A')}</b>\n` +
+        `🌐 <b>রাউটার:</b> ${escapeHtml(client.router || 'Core Router')}\n` +
+        (realOnu ? `📡 <b>ONU RX Power:</b> ${realOnu.rxPower !== null ? `${realOnu.rxPower.toFixed(1)} dBm` : 'N/A'}\n` : '') +
+        `\n<b>⚡ দ্রুত অ্যাকশন বাটন:</b>`;
+
+      await sendTelegramMessage(chatId, cardText, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: isOnline ? '🔴 লাইন বন্ধ করুন (OFF)' : '🟢 লাইন চালু করুন (Activate)', callback_data: isOnline ? `deact_${client.userId}` : `act_${client.userId}` },
+              { text: '📅 মেয়াদ +৩০ দিন', callback_data: `ext_${client.userId}` },
+            ],
+            [
+              { text: '🗑️ ক্লায়েন্ট ডিলিট', callback_data: `del_${client.userId}` },
+            ],
+          ],
+        },
+      });
       return;
     }
 
@@ -1832,10 +1973,81 @@ export async function executeAdminActivateClient(chatId: string, query: string):
   };
 
   localDbRef['nexora_clients'] = { value: clients, updatedAt: Date.now() };
+
+  // 1. Approve any pending online package orders for this client
+  const orders: any[] = localDbRef['nexora_online_orders']?.value || [];
+  let orderUpdated = false;
+  orders.forEach((o) => {
+    if (
+      (o.userId && o.userId.toLowerCase() === client.userId.toLowerCase()) ||
+      (o.phone && client.phone && o.phone === client.phone) ||
+      (o.clientId && o.clientId === client.id)
+    ) {
+      if (o.status === 'pending') {
+        o.status = 'approved';
+        o.approvedAt = new Date().toISOString();
+        orderUpdated = true;
+      }
+    }
+  });
+  if (orderUpdated) {
+    localDbRef['nexora_online_orders'] = { value: orders, updatedAt: Date.now() };
+  }
+
+  // 2. Mark any pending payments for this client as Completed
+  const payments: any[] = localDbRef['nexora_payments']?.value || [];
+  let paymentUpdated = false;
+  payments.forEach((p) => {
+    if (
+      (p.userId && p.userId.toLowerCase() === client.userId.toLowerCase()) ||
+      (p.clientName && p.clientName.toLowerCase() === client.name.toLowerCase())
+    ) {
+      if (p.status === 'Pending' || p.status === 'Pending Approval') {
+        p.status = 'Completed';
+        p.approvedAt = new Date().toISOString();
+        paymentUpdated = true;
+      }
+    }
+  });
+  if (paymentUpdated) {
+    localDbRef['nexora_payments'] = { value: payments, updatedAt: Date.now() };
+  }
+
   saveDbCallback();
 
+  // 3. Update MikroTik Router hardware status
+  const routers: any[] = localDbRef['nexora_routers']?.value || [];
+  const targetRouter =
+    routers.find((r) => r.name === client.router || r.ip === client.router) ||
+    routers.find((r) => r.connected) ||
+    routers[0];
+
+  let mikrotikStatusText = 'স্বয়ংক্রিয়ভাবে ডাটাবেজে সক্রিয়';
+  if (targetRouter && targetRouter.ip) {
+    const connParams: MikrotikConnParams = {
+      host: sanitizeMikrotikHost(targetRouter.ip),
+      port: Number(targetRouter.apiPort) || 8728,
+      username: String(targetRouter.username || 'admin').trim(),
+      password: targetRouter.password ? String(targetRouter.password).trim() : '',
+      timeoutMs: 6000,
+      useSsl: Number(targetRouter.apiPort) === 8729,
+      isDemo: Boolean(targetRouter.isDemo),
+    };
+
+    try {
+      const res = await setMikrotikClientStatus(connParams, client.userId, 'active');
+      if (res.success) {
+        mikrotikStatusText = `🟢 MikroTik রাউটারে অ্যাক্টিভ (${targetRouter.name || targetRouter.ip})`;
+      } else {
+        mikrotikStatusText = `⚠️ রাউটার স্ট্যাটাস: ${res.error || 'সফল'}`;
+      }
+    } catch (e: any) {
+      mikrotikStatusText = `⚠️ MikroTik: ${e.message}`;
+    }
+  }
+
   const msg =
-    `🟢 <b>লাইন সফলভাবে চালু করা হয়েছে! (Line is ON)</b>\n` +
+    `🟢 <b>লাইন সফলভাবে চালু ও সক্রিয় করা হয়েছে! (Line is ON)</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
     `👤 <b>গ্রাহকের নাম:</b> ${escapeHtml(client.name)}\n` +
     `🆔 <b>ইউজার আইডি:</b> <code>${escapeHtml(client.userId)}</code>\n` +
@@ -1843,7 +2055,9 @@ export async function executeAdminActivateClient(chatId: string, query: string):
     `📦 <b>প্যাকেজ:</b> ${escapeHtml(client.package || 'Standard')} (${escapeHtml(client.downloadSpeed || client.bandwidth || 'N/A')})\n` +
     `📶 <b>বর্তমান অবস্থা:</b> 🟢 <b>চালু (Active Online)</b>\n` +
     `📅 <b>মেয়াদ বর্ধিত হয়েছে:</b> <b>${escapeHtml(newExpiryStr)}</b>\n` +
-    `🌐 <b>রাউটার:</b> ${escapeHtml(client.router || 'Core Router')}\n` +
+    `🌐 <b>MikroTik সিঙ্ক:</b> ${escapeHtml(mikrotikStatusText)}\n` +
+    (orderUpdated ? `🛒 <b>অনলাইন অর্ডার:</b> ✅ অনুমোদিত (Approved)\n` : '') +
+    (paymentUpdated ? `💳 <b>পেমেন্ট রেকর্ড:</b> ✅ সম্পন্ন (Completed)\n` : '') +
     `⏰ <b>সময়:</b> ${new Date().toLocaleString()}`;
 
   await sendTelegramMessage(chatId, msg, {
@@ -1852,6 +2066,10 @@ export async function executeAdminActivateClient(chatId: string, query: string):
         [
           { text: '🔴 লাইন বন্ধ করুন (OFF)', callback_data: `deact_${client.userId}` },
           { text: '📅 মেয়াদ +৩০ দিন বাড়ান', callback_data: `ext_${client.userId}` },
+        ],
+        [
+          { text: '📊 লাইভ স্পিড চেক', callback_data: `my_bw` },
+          { text: '🔍 বিস্তারিত প্রোফাইল', callback_data: `search_${client.userId}` },
         ],
       ],
     },
@@ -1885,6 +2103,35 @@ export async function executeAdminDeactivateClient(chatId: string, query: string
   localDbRef['nexora_clients'] = { value: clients, updatedAt: Date.now() };
   saveDbCallback();
 
+  // Update MikroTik Router hardware status (suspend and kick active session)
+  const routers: any[] = localDbRef['nexora_routers']?.value || [];
+  const targetRouter =
+    routers.find((r) => r.name === client.router || r.ip === client.router) ||
+    routers.find((r) => r.connected) ||
+    routers[0];
+
+  let mikrotikStatusText = 'ডাটাবেজে স্থগিত';
+  if (targetRouter && targetRouter.ip) {
+    const connParams: MikrotikConnParams = {
+      host: sanitizeMikrotikHost(targetRouter.ip),
+      port: Number(targetRouter.apiPort) || 8728,
+      username: String(targetRouter.username || 'admin').trim(),
+      password: targetRouter.password ? String(targetRouter.password).trim() : '',
+      timeoutMs: 6000,
+      useSsl: Number(targetRouter.apiPort) === 8729,
+      isDemo: Boolean(targetRouter.isDemo),
+    };
+
+    try {
+      const res = await setMikrotikClientStatus(connParams, client.userId, 'suspended');
+      if (res.success) {
+        mikrotikStatusText = `🔴 MikroTik রাউটারে বন্ধ ও সেশন ডিসকানেক্টেড`;
+      }
+    } catch (e: any) {
+      mikrotikStatusText = `⚠️ MikroTik: ${e.message}`;
+    }
+  }
+
   const msg =
     `🔴 <b>লাইন সফলভাবে বন্ধ করা হয়েছে! (Line is OFF)</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -1893,6 +2140,7 @@ export async function executeAdminDeactivateClient(chatId: string, query: string
     `📞 <b>ফোন নম্বর:</b> <code>${escapeHtml(client.phone || 'N/A')}</code>\n` +
     `📦 <b>প্যাকেজ:</b> ${escapeHtml(client.package || 'Standard')}\n` +
     `📶 <b>বর্তমান অবস্থা:</b> 🔴 <b>বন্ধ (Offline / Suspended)</b>\n` +
+    `🌐 <b>MikroTik রাউটার:</b> ${escapeHtml(mikrotikStatusText)}\n` +
     `⏰ <b>সময়:</b> ${new Date().toLocaleString()}`;
 
   await sendTelegramMessage(chatId, msg, {
@@ -1940,6 +2188,29 @@ export async function executeAdminExtendClient(chatId: string, query: string, da
 
   localDbRef['nexora_clients'] = { value: clients, updatedAt: Date.now() };
   saveDbCallback();
+
+  // Update MikroTik Router hardware status
+  const routers: any[] = localDbRef['nexora_routers']?.value || [];
+  const targetRouter =
+    routers.find((r) => r.name === client.router || r.ip === client.router) ||
+    routers.find((r) => r.connected) ||
+    routers[0];
+
+  if (targetRouter && targetRouter.ip) {
+    const connParams: MikrotikConnParams = {
+      host: sanitizeMikrotikHost(targetRouter.ip),
+      port: Number(targetRouter.apiPort) || 8728,
+      username: String(targetRouter.username || 'admin').trim(),
+      password: targetRouter.password ? String(targetRouter.password).trim() : '',
+      timeoutMs: 6000,
+      useSsl: Number(targetRouter.apiPort) === 8729,
+      isDemo: Boolean(targetRouter.isDemo),
+    };
+
+    try {
+      await setMikrotikClientStatus(connParams, client.userId, 'active');
+    } catch {}
+  }
 
   const msg =
     `<b>📅 Subscription Validity Extended (+${days} Days)</b>\n` +
@@ -2314,7 +2585,7 @@ export function startTelegramPollingWorker(): void {
   if (!token) return;
 
   isPollingWorkerActive = true;
-  console.log('[TelegramBot] Starting background update polling worker for @' + (process.env.TELEGRAM_BOT_USERNAME || 'NexoranetworkISPBot'));
+  console.log('[TelegramBot] Starting high-speed background update polling worker for @' + (process.env.TELEGRAM_BOT_USERNAME || 'NexoranetworkISPBot'));
 
   // Sync profile and commands with Telegram API on startup
   syncBotProfileToTelegram().catch(() => {});
@@ -2331,24 +2602,29 @@ export function startTelegramPollingWorker(): void {
 
       const res = await callTelegramApi('getUpdates', {
         offset: pollingOffset,
-        timeout: 20,
+        timeout: 25,
         allowed_updates: ['message', 'callback_query'],
       });
 
-      if (res && res.ok && Array.isArray(res.result)) {
-        for (const update of res.result) {
-          pollingOffset = update.update_id + 1;
-          try {
-            await handleTelegramIncomingUpdate(update);
-          } catch (handleErr) {
-            console.error('[TelegramBot] Error processing update:', handleErr);
-          }
-        }
+      if (res && res.ok && Array.isArray(res.result) && res.result.length > 0) {
+        const maxId = Math.max(...res.result.map((u: any) => u.update_id));
+        pollingOffset = maxId + 1;
+
+        // Process updates concurrently for lightning-fast sub-second command response
+        await Promise.all(
+          res.result.map(async (update: any) => {
+            try {
+              await handleTelegramIncomingUpdate(update);
+            } catch (handleErr) {
+              console.error('[TelegramBot] Error processing update:', handleErr);
+            }
+          })
+        );
       }
-      setTimeout(poll, 1000);
+      setTimeout(poll, 100); // High-speed rapid poll loop
     } catch (err: any) {
       // Backoff on network or timeout error
-      setTimeout(poll, 8000);
+      setTimeout(poll, 3000);
     }
   }
 

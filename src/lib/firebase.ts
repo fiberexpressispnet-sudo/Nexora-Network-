@@ -21,9 +21,7 @@ export async function testFirestoreConnection(): Promise<boolean> {
     await getDocFromServer(doc(db, '_health', 'connection'));
     return true;
   } catch (error: any) {
-    if (error?.message?.includes('the client is offline') || error?.code === 'unavailable') {
-      console.warn('Firestore operates in offline cache mode or re-establishing backend connection.');
-    }
+    // Gracefully fallback to local storage / offline mode without logging verbose warnings
     return false;
   }
 }

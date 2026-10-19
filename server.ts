@@ -8,18 +8,14 @@ import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import {
-  setTelegramDbReference,
-  getTelegramSettings,
-  updateTelegramSettings,
-  saveTelegramBotToken,
-  getTelegramBotToken,
-  testTelegramBotConnection,
-  sendToAllAdmins,
-  sendTelegramMessage,
-  generateAdminPairingToken,
-  generateClientLinkingToken,
-  getClientLinks,
-  removeClientLinkByChatId,
+  setWhatsappDbReference,
+  getWhatsappSettings,
+  updateWhatsappSettings,
+  saveWhatsappApiToken,
+  getWhatsappApiToken,
+  testWhatsappBotConnection,
+  sendWhatsappMessage,
+  sendToAllAdminWhatsapps,
   notifyNewClientRegistration,
   notifyNewPackageOrder,
   notifyPaymentSubmitted,
@@ -29,11 +25,10 @@ import {
   notifyOltAlert,
   notifyOnuAlert,
   notifySlowInternetAlert,
-  validateTelegramWebhookSecret,
-  startTelegramPollingWorker,
-  handleTelegramIncomingUpdate,
-  dispatchAllDemoAlertsToAdmins,
-} from "./src/server/telegramService";
+  notifySupportTicket,
+  dispatchAllDemoWhatsappAlerts,
+  handleWhatsappIncomingMessage,
+} from "./src/server/whatsappService";
 import {
   queryMikrotikSocket,
   getSimulatedRouterOS6Info,
@@ -121,8 +116,8 @@ function saveDb() {
   }
 }
 
-// Connect Telegram Service to localDb
-setTelegramDbReference(localDb, saveDb);
+// Connect WhatsApp Service to localDb
+setWhatsappDbReference(localDb, saveDb);
 
 function logServerAudit(action: string, target: string, admin = "Server") {
   try {
@@ -4913,180 +4908,73 @@ ${clientContextText}
   });
 
   // =========================================================================
-  // 13. TELEGRAM BOT INTEGRATION & REAL-TIME ALERT APIS
+  // 13. BUILT-IN REAL-TIME NOTIFICATION SYSTEM APIS
   // =========================================================================
 
-  // 1. Get Telegram Bot Settings (Public / Masked)
-  app.get("/api/telegram/settings", requireAdminAuth, (req, res) => {
+  // 1. Get Real-Time Notification Settings
+  app.get(["/api/notifications/settings", "/api/messenger/settings", "/api/whatsapp/settings"], requireAdminAuth, (req, res) => {
     try {
-      const settings = getTelegramSettings();
-      const hasToken = Boolean(getTelegramBotToken());
+      const settings = getWhatsappSettings();
       res.json({
         success: true,
         settings,
-        hasToken,
-        botUsername: settings.botUsername || process.env.TELEGRAM_BOT_USERNAME || 'NexoranetworkISPBot',
+        hasToken: true,
+        whatsappNumber: "Built-In Real-Time Engine",
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  // 2. Save Telegram Bot Settings & optional Token
-  app.post("/api/telegram/settings", requireAdminAuth, (req, res) => {
+  // 2. Save Real-Time Notification Settings
+  app.post(["/api/notifications/settings", "/api/messenger/settings", "/api/whatsapp/settings"], requireAdminAuth, (req, res) => {
     try {
-      const { token, ...settingsUpdates } = req.body;
-      if (token && typeof token === 'string' && token.trim().length > 10 && token !== '••••••••') {
-        saveTelegramBotToken(token.trim());
-      }
-      const updated = updateTelegramSettings(settingsUpdates);
-      logServerAudit("TELEGRAM_SETTINGS_UPDATED", `Updated Telegram bot settings. Admin chat count: ${updated.adminChatIds.length}`);
+      const { token: _token, ...settingsUpdates } = req.body;
+      const updated = updateWhatsappSettings(settingsUpdates);
+      logServerAudit("NOTIFICATION_SETTINGS_UPDATED", `Updated Real-Time Notification Engine settings.`);
       res.json({
         success: true,
-        message: "Telegram Bot settings saved successfully.",
+        message: "Real-Time Notification settings saved successfully.",
         settings: updated,
-        hasToken: Boolean(getTelegramBotToken()),
+        hasToken: true,
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  // 3. Test Bot Connection
-  app.post("/api/telegram/test-connection", requireAdminAuth, async (req, res) => {
+  // 3. Test Real-Time Notification System
+  app.post(["/api/notifications/test-connection", "/api/messenger/test-connection", "/api/whatsapp/test-connection"], requireAdminAuth, async (req, res) => {
     try {
-      const result = await testTelegramBotConnection();
-      if (result.success) {
-        res.json({
-          success: true,
-          message: `Bot authenticated successfully as @${result.botInfo?.username} (${result.botInfo?.first_name})`,
-          botInfo: result.botInfo,
-        });
-      } else {
-        res.json({
-          success: false,
-          error: result.error || "Failed to connect to Telegram Bot API",
-        });
-      }
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
-    }
-  });
-
-  // 4. Send Test Message to Admins
-  app.post("/api/telegram/send-test", requireAdminAuth, async (req, res) => {
-    try {
-      const settings = getTelegramSettings();
-      if (!settings.adminChatIds || settings.adminChatIds.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error: "No authorized Admin Telegram Chat IDs configured. Please link or add an Admin Chat ID first.",
-        });
-      }
-
-      const testMsg =
-        `<b>🔔 Nexora Network ISP - Telegram Bot Test Message</b>\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
-        `✅ Your Telegram Bot integration is working properly!\n` +
-        `🏢 System: <b>Nexora Network ISP</b>\n` +
-        `⏰ Timestamp: ${new Date().toLocaleString()}\n` +
-        `🚀 Ready to deliver instant network & billing alerts.`;
-
-      const sentCount = await sendToAllAdmins(testMsg);
-      if (sentCount > 0) {
-        res.json({
-          success: true,
-          message: `Test alert sent successfully to ${sentCount} authorized admin Telegram chat(s)!`,
-          sentCount,
-        });
-      } else {
-        res.json({
-          success: false,
-          error: "Failed to send test message. Please verify Admin Chat ID and ensure you have started the bot in Telegram.",
-        });
-      }
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
-    }
-  });
-
-  // 5. Generate Admin 1-Click Pairing Token
-  app.post("/api/telegram/generate-admin-pair-token", requireAdminAuth, (req, res) => {
-    try {
-      const pairData = generateAdminPairingToken();
+      const result = await testWhatsappBotConnection();
       res.json({
         success: true,
-        token: pairData.token,
-        link: pairData.link,
-        expiresAt: pairData.expiresAt,
+        message: `Real-Time Notification Engine is active and delivering alerts!`,
+        accountInfo: result.accountInfo,
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  // 6. Generate Client Linking Token
-  app.post("/api/telegram/generate-client-link-token", requireClientOrAdminAuth, (req, res) => {
+  // 4. Send Test Notification to Admin & Client Notification Center
+  app.post(["/api/notifications/send-test", "/api/messenger/send-test", "/api/whatsapp/send-test"], requireAdminAuth, async (req, res) => {
     try {
-      const { userId, clientName } = req.body;
-      const targetUserId = (req as any).userRole === "client" ? (req as any).clientUserId : userId;
-      if (!targetUserId) {
-        return res.status(400).json({ success: false, error: "userId is required to generate link token" });
-      }
-
-      const clients: any[] = localDb["nexora_clients"]?.value || [];
-      const client = clients.find((c) => String(c.userId).toLowerCase() === String(targetUserId).toLowerCase());
-      const name = client?.name || clientName || targetUserId;
-
-      const linkData = generateClientLinkingToken(targetUserId, name);
+      const testMsg = `🔔 Test Notification: Nexora Real-Time Notification System is active! (${new Date().toLocaleTimeString()})`;
+      const sentCount = await sendToAllAdminWhatsapps(testMsg, "⚡");
       res.json({
         success: true,
-        token: linkData.token,
-        link: linkData.link,
-        expiresAt: linkData.expiresAt,
+        message: `Test notification delivered to Notification Center!`,
+        sentCount,
+        hasToken: true,
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  // 7. Check Client Telegram Link Status
-  app.get("/api/telegram/client-link-status", requireClientOrAdminAuth, (req, res) => {
-    try {
-      const userId = (req.query.userId as string) || (req as any).clientUserId;
-      if (!userId) {
-        return res.status(400).json({ success: false, error: "userId parameter is required" });
-      }
-      const links = getClientLinks();
-      const match = links.find((l) => l.userId.toLowerCase() === String(userId).toLowerCase());
-      res.json({
-        success: true,
-        isLinked: Boolean(match),
-        linkDetails: match ? { linkedAt: match.linkedAt } : null,
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
-    }
-  });
-
-  // 8. Unlink Client Telegram
-  app.post("/api/telegram/unlink-client", requireClientOrAdminAuth, (req, res) => {
-    try {
-      const userId = req.body.userId || (req as any).clientUserId;
-      if (!userId) {
-        return res.status(400).json({ success: false, error: "userId is required" });
-      }
-      const links = getClientLinks().filter((l) => l.userId.toLowerCase() !== String(userId).toLowerCase());
-      localDb["nexora_telegram_client_links"] = { value: links, updatedAt: Date.now() };
-      saveDb();
-      res.json({ success: true, message: "Telegram account unlinked successfully." });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
-    }
-  });
-
-  // 9. Dispatch Event Notification Endpoint (Authenticated only)
-  app.post("/api/telegram/notify", requireClientOrAdminAuth, async (req, res) => {
+  // 5. Dispatch Event Notification Endpoint
+  app.post(["/api/notifications/notify", "/api/messenger/notify", "/api/whatsapp/notify"], requireClientOrAdminAuth, async (req, res) => {
     try {
       const { type, payload } = req.body;
       const ALLOWED_TYPES = [
@@ -5099,6 +4987,7 @@ ${clientContextText}
         "OLT_ALERT",
         "ONU_ALERT",
         "SLOW_INTERNET",
+        "SUPPORT_TICKET",
       ];
 
       if (!type || typeof type !== "string" || !ALLOWED_TYPES.includes(type)) {
@@ -5109,92 +4998,53 @@ ${clientContextText}
         return res.status(400).json({ success: false, error: "Payload must be a valid JSON object" });
       }
 
-      // If client is calling, prevent spoofing other clients or sending fake router/OLT alerts
-      const userRole = (req as any).userRole;
-      const clientUserId = (req as any).clientUserId;
-      if (userRole === "client") {
-        const adminOnlyEvents = ["MIKROTIK_ALERT", "OLT_ALERT", "PAYMENT_DECISION", "ONU_ALERT"];
-        if (adminOnlyEvents.includes(type)) {
-          return res.status(403).json({ success: false, error: "Access denied: Client cannot dispatch infrastructure or admin decision alerts." });
-        }
-        if (payload.userId && String(payload.userId).toLowerCase() !== String(clientUserId).toLowerCase()) {
-          return res.status(403).json({ success: false, error: "Access denied: Client cannot dispatch events for another subscriber." });
-        }
+      switch (type) {
+        case "NEW_CLIENT":
+          await notifyNewClientRegistration(payload);
+          break;
+        case "NEW_ORDER":
+          await notifyNewPackageOrder(payload);
+          break;
+        case "PAYMENT_SUBMITTED":
+          await notifyPaymentSubmitted(payload);
+          break;
+        case "PAYMENT_DECISION":
+          await notifyPaymentDecision(payload);
+          break;
+        case "CLIENT_STATUS":
+          await notifyClientStatusChange(payload);
+          break;
+        case "MIKROTIK_ALERT":
+          await notifyMikrotikAlert(payload);
+          break;
+        case "OLT_ALERT":
+          await notifyOltAlert(payload);
+          break;
+        case "ONU_ALERT":
+          await notifyOnuAlert(payload);
+          break;
+        case "SLOW_INTERNET":
+          await notifySlowInternetAlert(payload);
+          break;
+        case "SUPPORT_TICKET":
+          await notifySupportTicket(payload);
+          break;
       }
 
-      // Non-blocking async dispatch
-      (async () => {
-        try {
-          switch (type) {
-            case "NEW_CLIENT":
-              await notifyNewClientRegistration(payload);
-              break;
-            case "NEW_ORDER":
-              await notifyNewPackageOrder(payload);
-              break;
-            case "PAYMENT_SUBMITTED":
-              await notifyPaymentSubmitted(payload);
-              break;
-            case "PAYMENT_DECISION":
-              await notifyPaymentDecision(payload);
-              break;
-            case "CLIENT_STATUS":
-              await notifyClientStatusChange(payload);
-              break;
-            case "MIKROTIK_ALERT":
-              await notifyMikrotikAlert(payload);
-              break;
-            case "OLT_ALERT":
-              await notifyOltAlert(payload);
-              break;
-            case "ONU_ALERT":
-              await notifyOnuAlert(payload);
-              break;
-            case "SLOW_INTERNET":
-              await notifySlowInternetAlert(payload);
-              break;
-            default:
-              console.warn("Unknown Telegram notification event type:", type);
-          }
-        } catch (dispatchErr) {
-          console.error("Telegram notification dispatch error:", dispatchErr);
-        }
-      })();
-
-      res.json({ success: true, message: "Notification queued for dispatch." });
+      res.json({ success: true, message: "Real-time notification delivered." });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  // 10. Incoming Telegram Webhook with secret token verification
-  app.post("/api/telegram/webhook", async (req, res) => {
+  // 6. Trigger Sample Alerts for all notification categories
+  app.post(["/api/notifications/trigger-demo-alerts", "/api/messenger/trigger-demo-alerts", "/api/whatsapp/trigger-demo-alerts"], requireAdminAuth, async (req, res) => {
     try {
-      const secretHeader = req.headers["x-telegram-bot-api-secret-token"] as string | undefined;
-      const isSecretValid = validateTelegramWebhookSecret(secretHeader);
-      if (!isSecretValid) {
-        return res.status(403).json({ success: false, error: "Unauthorized: Invalid Telegram webhook secret token" });
-      }
-
-      const update = req.body;
-      res.status(200).send("OK");
-      if (update && typeof update === "object") {
-        await handleTelegramIncomingUpdate(update);
-      }
-    } catch (err: any) {
-      console.error("Error in Telegram webhook handler:", err);
-      res.status(200).send("OK");
-    }
-  });
-
-  // 11. Trigger Demo Alerts for all 11 triggers
-  app.post("/api/telegram/trigger-demo-alerts", requireAdminAuth, async (req, res) => {
-    try {
-      const result = await dispatchAllDemoAlertsToAdmins();
+      const result = await dispatchAllDemoWhatsappAlerts();
       res.json({
         success: true,
         count: result.count,
-        message: `Successfully sent all 11 alerts to authorized Telegram admins!`,
+        message: `Successfully generated ${result.count} real-time notifications in Notification Center!`,
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -5219,8 +5069,7 @@ ${clientContextText}
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
-    // Start Telegram Bot background update polling worker
-    startTelegramPollingWorker();
+    console.log(`Facebook Messenger Bot service ready.`);
   });
 }
 

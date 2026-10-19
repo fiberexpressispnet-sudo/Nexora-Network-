@@ -56,7 +56,7 @@
   },
   "nexora_clients": {
     "value": [],
-    "updatedAt": 1790837939436
+    "updatedAt": 1791033001786
   },
   "nexora_days_profiles": {
     "value": [
@@ -565,590 +565,24 @@
   "nexora_audit_logs": {
     "value": [
       {
-        "id": "zhsclhe",
+        "id": "qrevy97",
         "admin": "admin",
         "action": "Updated Settings",
         "target": "App",
-        "time": "10/1/2026, 12:47:09 PM",
+        "time": "10/3/2026, 7:11:42 PM",
         "ip": "127.0.0.1",
         "result": "Success"
       },
       {
-        "id": "n724ube",
-        "admin": "admin",
-        "action": "Approve Online Order",
-        "target": "Approved ORD-202610-4419 for Mim (TrxID: BKHFGKGF)",
-        "time": "10/1/2026, 12:45:16 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "khpbeft",
-        "admin": "admin",
-        "action": "Auto Generate Invoices",
-        "target": "1 billing statements auto-generated for 2026-10",
-        "time": "10/1/2026, 12:44:46 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "AUD-1790837056539-121",
-        "action": "CLIENT_ORDER_CREATED",
-        "details": "Client order created for Mim (01410381233) for package 20 Mbps (24 Hours Pac)",
+        "id": "AUD-1791033010399-373",
+        "action": "WHATSAPP_SETTINGS_UPDATED",
+        "details": "Updated WhatsApp bot settings. Admin number count: 1",
         "user": "Admin",
         "ip": "127.0.0.1",
-        "timestamp": "2026-10-01T06:44:16.539Z"
-      },
-      {
-        "id": "dfwjdq3",
-        "admin": "admin",
-        "action": "Updated Settings",
-        "target": "App",
-        "time": "10/1/2026, 12:39:19 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "AUD-1790836294677-831",
-        "action": "TELEGRAM_SETTINGS_UPDATED",
-        "details": "Updated Telegram bot settings. Admin chat count: 0",
-        "user": "Admin",
-        "ip": "127.0.0.1",
-        "timestamp": "2026-10-01T06:31:34.677Z"
-      },
-      {
-        "id": "h0xt8c1",
-        "admin": "admin",
-        "action": "Auto Generate Invoices",
-        "target": "2 billing statements auto-generated for 2026-10",
-        "time": "10/1/2026, 12:28:36 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "e9benyl",
-        "admin": "admin",
-        "action": "Auto Generate Invoices",
-        "target": "2 billing statements auto-generated for 2026-09",
-        "time": "9/7/2026, 4:48:22 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "kh0jp1t",
-        "admin": "admin",
-        "action": "Approve Online Order",
-        "target": "Approved ORD-202609-4826 for Bkhf (TrxID: NJH)",
-        "time": "9/7/2026, 4:47:58 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "rdf89bo",
-        "admin": "admin",
-        "action": "Auto Generate Invoices",
-        "target": "1 billing statements auto-generated for 2026-09",
-        "time": "9/7/2026, 4:47:37 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "k9ez9oj",
-        "admin": "admin",
-        "action": "Renew Subscription",
-        "target": "CLI-1788777750815-630",
-        "time": "9/7/2026, 4:46:30 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "2kkmd6s",
-        "admin": "admin",
-        "action": "Auto Generate Invoices",
-        "target": "1 billing statements auto-generated for 2026-09",
-        "time": "9/7/2026, 4:46:05 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "vkkixn3",
-        "admin": "admin",
-        "action": "Delete Invoice",
-        "target": "INV-202609-9790",
-        "time": "9/7/2026, 4:46:04 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "5da23hf",
-        "admin": "admin",
-        "action": "Approve Online Order",
-        "target": "Approved ORD-202609-9671 for Niloy (TrxID: HJGDUUF)",
-        "time": "9/7/2026, 4:45:06 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "ubbhiks",
-        "admin": "admin",
-        "action": "Auto Generate Invoices",
-        "target": "1 billing statements auto-generated for 2026-09",
-        "time": "9/7/2026, 4:44:09 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "pvkm2vh",
-        "admin": "admin",
-        "action": "Updated Settings",
-        "target": "App",
-        "time": "9/7/2026, 4:38:41 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "k0cz6as",
-        "admin": "admin",
-        "action": "Updated Settings",
-        "target": "App",
-        "time": "9/7/2026, 4:38:37 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "2dlntk2",
-        "admin": "admin",
-        "action": "Updated Settings",
-        "target": "App",
-        "time": "9/7/2026, 4:38:11 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "8tedfzo",
-        "admin": "admin",
-        "action": "Delete Invoice",
-        "target": "INV-202609-4820",
-        "time": "9/7/2026, 4:34:35 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "t73od32",
-        "admin": "admin",
-        "action": "Delete Invoice",
-        "target": "INV-202609-1632",
-        "time": "9/7/2026, 4:34:33 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "e8gwnkf",
-        "admin": "admin",
-        "action": "Delete Invoice",
-        "target": "INV-202609-8189",
-        "time": "9/7/2026, 4:34:32 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "hlix5rn",
-        "admin": "admin",
-        "action": "Delete Invoice",
-        "target": "INV-202609-8238",
-        "time": "9/7/2026, 4:34:30 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "6g6wv6e",
-        "admin": "admin",
-        "action": "Delete Invoice",
-        "target": "INV-202609-6414",
-        "time": "9/7/2026, 4:34:29 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "zahq5ay",
-        "admin": "admin",
-        "action": "Delete Invoice",
-        "target": "INV-202609-3471",
-        "time": "9/7/2026, 4:34:28 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "g2k1ar4",
-        "admin": "admin",
-        "action": "Payment Reminder Sent",
-        "target": "INV-202609-3471 (Mahbubur Rahman) via GATEWAY",
-        "time": "9/7/2026, 4:34:21 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "nakpvdd",
-        "admin": "admin",
-        "action": "Payment Reminder Sent",
-        "target": "INV-202609-8189 (Sultana Razia) via GATEWAY",
-        "time": "9/7/2026, 4:34:08 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "obkh9m8",
-        "admin": "admin",
-        "action": "Payment Reminder Sent",
-        "target": "INV-202609-8189 (Sultana Razia) via SMS",
-        "time": "9/7/2026, 4:33:05 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "dexh7yk",
-        "admin": "admin",
-        "action": "Payment Reminder Sent",
-        "target": "INV-202609-8189 (Sultana Razia) via GATEWAY",
-        "time": "9/7/2026, 4:32:52 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "2bvjivm",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_tanvir - Disabled",
-        "time": "9/7/2026, 4:32:09 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "et71cp0",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_shakil - Disabled",
-        "time": "9/7/2026, 4:32:07 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "381kqiu",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_nusrat - Disabled",
-        "time": "9/7/2026, 4:32:06 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "1lpie8k",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_farhan - Disabled",
-        "time": "9/7/2026, 4:32:05 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "qrq0iey",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_mahbub - Disabled",
-        "time": "9/7/2026, 4:32:03 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "q981uk9",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_razia - Disabled",
-        "time": "9/7/2026, 4:32:01 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "q4svt7c",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Tanvir Hossain",
-        "time": "9/7/2026, 4:31:07 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "mchzcj9",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Shakil Ahmed",
-        "time": "9/7/2026, 4:31:06 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "q9tp267",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Nusrat Jahan",
-        "time": "9/7/2026, 4:31:04 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "ta8bp9h",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Farhan Kabir",
-        "time": "9/7/2026, 4:31:03 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "pqffih9",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Mahbubur Rahman",
-        "time": "9/7/2026, 4:31:01 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "grlkbis",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Sultana Razia",
-        "time": "9/7/2026, 4:31:00 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "23kq4t1",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_razia - Disabled",
-        "time": "9/7/2026, 4:26:24 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "ciwk5pg",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_farhan - Disabled",
-        "time": "9/7/2026, 4:26:22 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "2yrbnbg",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_shakil - Disabled",
-        "time": "9/7/2026, 4:26:20 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "q6m81hy",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_nusrat - Disabled",
-        "time": "9/7/2026, 4:26:19 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "yssfxl8",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_mahbub - Disabled",
-        "time": "9/7/2026, 4:26:18 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "aivhfz3",
-        "admin": "admin",
-        "action": "MikroTik API Toggle",
-        "target": "user_tanvir - Disabled",
-        "time": "9/7/2026, 4:26:16 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "ml1ty3h",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Sultana Razia",
-        "time": "9/7/2026, 4:25:23 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "hvp52pb",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Farhan Kabir",
-        "time": "9/7/2026, 4:25:20 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "xqn269g",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Shakil Ahmed",
-        "time": "9/7/2026, 4:25:19 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "d0lvppp",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Nusrat Jahan",
-        "time": "9/7/2026, 4:25:17 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "4bashfu",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Mahbubur Rahman",
-        "time": "9/7/2026, 4:25:16 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "ivzqhzq",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Tanvir Hossain",
-        "time": "9/7/2026, 4:25:14 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "23rwzy4",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Mahbubur Rahman",
-        "time": "9/7/2026, 4:24:52 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "v3porfp",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Nusrat Jahan",
-        "time": "9/7/2026, 4:24:50 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "5xcelft",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Shakil Ahmed",
-        "time": "9/7/2026, 4:24:43 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "96mw0g4",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Farhan Kabir",
-        "time": "9/7/2026, 4:24:41 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "gtowrs3",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Sultana Razia",
-        "time": "9/7/2026, 4:24:40 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "sd8dd1q",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Tanvir Hossain",
-        "time": "9/7/2026, 4:24:34 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "7acgnxo",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Tanvir Hossain",
-        "time": "9/7/2026, 4:24:17 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "6iwrvzq",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Sultana Razia",
-        "time": "9/7/2026, 4:24:16 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "hiurp6u",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Mahbubur Rahman",
-        "time": "9/7/2026, 4:24:14 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "5e3r3ez",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Farhan Kabir",
-        "time": "9/7/2026, 4:24:13 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "l7mn684",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Nusrat Jahan",
-        "time": "9/7/2026, 4:24:11 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "svpehsi",
-        "admin": "admin",
-        "action": "Delete Client",
-        "target": "Shakil Ahmed",
-        "time": "9/7/2026, 4:24:10 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
-      },
-      {
-        "id": "blqyh76",
-        "admin": "admin",
-        "action": "Auto Generate Invoices",
-        "target": "5 billing statements auto-generated for 2026-09",
-        "time": "9/7/2026, 4:22:48 PM",
-        "ip": "127.0.0.1",
-        "result": "Success"
+        "timestamp": "2026-10-03T13:10:10.399Z"
       }
     ],
-    "updatedAt": 1790837229703
+    "updatedAt": 1791033102289
   },
   "nexora_router_config": {
     "value": {
@@ -1200,7 +634,7 @@
   },
   "nexora_payments": {
     "value": [],
-    "updatedAt": 1790837939436
+    "updatedAt": 1791033001788
   },
   "nexora_invoices": {
     "value": [],
@@ -1286,5 +720,27 @@
   "nexora_telegram_client_links": {
     "value": [],
     "updatedAt": 1790837939436
+  },
+  "nexora_whatsapp_settings": {
+    "value": {
+      "enabled": true,
+      "whatsappNumber": "+8801817681233",
+      "adminNumbers": [
+        "+8801817681233"
+      ],
+      "notifyNewClient": true,
+      "notifyNewOrder": true,
+      "notifyPaymentSubmitted": true,
+      "notifyPaymentApproved": true,
+      "notifyPaymentRejected": true,
+      "notifyClientActivated": true,
+      "notifyClientExpired": true,
+      "notifyMikrotikAlerts": true,
+      "notifyOltAlerts": true,
+      "notifyOnuAlerts": true,
+      "notifyLowOpticalPower": true,
+      "notifySupportTicket": true
+    },
+    "updatedAt": 1791033010398
   }
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Client, AppSettings, SmsLogItem } from '../../types';
+import { dispatchInAppNotification, playNotificationChime } from '../../lib/notificationEngine';
 import {
  MessageSquare,
  Send,
@@ -182,7 +183,7 @@ export const SmsNotificationPage: React.FC<SmsNotificationPageProps> = ({
  {[
  { id: 'broadcast', label: 'Broadcast SMS Composer', icon: Send },
  { id: 'triggers', label: 'Automated Event Triggers (9 Triggers)', icon: Bell },
- { id: 'gateway', label: 'SMS Gateway & WhatsApp API', icon: Sliders },
+ { id: 'gateway', label: 'SMS Gateway & Notification Engine', icon: Sliders },
  { id: 'logs', label: `Sent Delivery Logs (${logs.length})`, icon: Clock },
  ].map((tab) => {
  const Icon = tab.icon;
@@ -283,38 +284,42 @@ export const SmsNotificationPage: React.FC<SmsNotificationPageProps> = ({
  </div>
  </div>
 
- {/* WhatsApp Direct Link Preview */}
+ {/* Direct In-App Portal Notification Sender */}
  <div className="bg-white border border-slate-200 rounded p-5 shadow-sm space-y-4">
  <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
- <Smartphone className="w-4 h-4 text-emerald-500" />
- <span>Direct WhatsApp Messenger Integration</span>
+ <Bell className="w-4 h-4 text-sky-600" />
+ <span>Direct Client Portal Instant Notification</span>
  </h3>
  <p className="text-xs text-slate-800">
- Send custom notifications directly to any client via WhatsApp Web or mobile app.
+ Send real-time alerts directly to a subscriber&apos;s Client Portal &amp; Notification Center with 1 click (No Bot required).
  </p>
 
  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
- {clients.slice(0, 5).map((client, idx) => {
- const waUrl = `https://wa.me/88${client.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
- `Dear ${client.name}, important update regarding your Nexora network internet service.`
- )}`;
+ {clients.slice(0, 6).map((client, idx) => {
  return (
  <div
  key={client.id ? `${client.id}-${idx}` : idx}
  className="p-3 bg-slate-50 border border-slate-100 rounded flex items-center justify-between text-xs"
  >
  <div>
- <div className="font-bold text-slate-900 ">{client.name}</div>
- <div className="text-[10px] text-emerald-500 font-mono">{client.phone}</div>
+ <div className="font-bold text-slate-900 ">{client.name} ({client.userId})</div>
+ <div className="text-[10px] text-sky-600 font-mono">{client.phone} • Exp: {client.expiry}</div>
  </div>
- <a
- href={waUrl}
- target="_blank"
- rel="noopener noreferrer"
- className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[11px] transition-colors cursor-pointer flex items-center gap-1"
+ <button
+ type="button"
+ onClick={async () => {
+ await dispatchInAppNotification(
+   `🔔 Notice for ${client.name} (${client.userId}): Dear subscriber, please check your package (${client.package}) billing & expiry (${client.expiry}) status.`,
+   '🔔'
+ );
+ playNotificationChime('info');
+ showToast(`Direct portal alert sent to ${client.name}!`, 'success');
+ }}
+ className="px-3 py-1 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg text-[11px] transition-colors cursor-pointer flex items-center gap-1"
  >
- <span>WhatsApp</span>
- </a>
+ <Bell className="w-3 h-3" />
+ <span>Send Alert</span>
+ </button>
  </div>
  );
  })}

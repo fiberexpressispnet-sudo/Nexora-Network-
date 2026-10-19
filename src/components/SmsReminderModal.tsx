@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Client, AppSettings } from '../types';
 import { SMS_TEMPLATES, getClientExpiryInfo } from '../lib/expiryUtils';
+import { dispatchInAppNotification, playNotificationChime } from '../lib/notificationEngine';
 import { Modal } from './Modal';
 import {
  MessageSquare,
@@ -97,17 +98,17 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  onClose();
  };
 
- const handleSendViaWhatsApp = () => {
- const formattedPhone = cleanPhone.startsWith('88') ? cleanPhone : `88${cleanPhone.replace(/^0+/, '')}`;
- const encodedBody = encodeURIComponent(messageText);
- const waUrl = `https://wa.me/${formattedPhone}?text=${encodedBody}`;
- 
- window.open(waUrl, '_blank');
+ const handleSendViaWhatsApp = async () => {
+ await dispatchInAppNotification(
+   `🔔 Reminder for ${client.name} (${client.userId}): ${messageText}`,
+   '⏰'
+ );
+ playNotificationChime('info');
  
  if (onSmsSent) {
  onSmsSent(client, messageText, 'WhatsApp');
  }
- showToast(`💬 Sending WhatsApp reminder to ${client.name}!`, 'success');
+ showToast(`🔔 In-App Portal Notification sent directly to ${client.name}!`, 'success');
  onClose();
  };
 
@@ -239,14 +240,14 @@ export const SmsReminderModal: React.FC<SmsReminderModalProps> = ({
  <span>Send SMS</span>
  </button>
 
- {/* WhatsApp */}
+ {/* In-App Portal Notification */}
  <button
  type="button"
  onClick={handleSendViaWhatsApp}
- className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-98"
+ className="py-2.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-110 text-white font-bold rounded flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-98"
  >
  <Send className="w-4 h-4" />
- <span>Send WhatsApp</span>
+ <span>Send Portal Notification</span>
  </button>
  </div>
 

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { SupportTicket, Client, AppSettings } from '../../types';
+import { sendTelegramNotification } from '../../lib/telegramClient';
 import {
  Headphones,
  Plus,
@@ -146,6 +147,18 @@ export const SupportTicketsPage: React.FC<SupportTicketsPageProps> = ({
 
  const updated = [newTicket, ...tickets];
  saveTickets(updated);
+
+ sendTelegramNotification('SUPPORT_TICKET', {
+   clientName: newTicket.clientName,
+   userId: selectedClient?.userId || newTicket.clientId,
+   phone: newTicket.phone,
+   category: newTicket.category,
+   priority: newTicket.priority,
+   subject: newTicket.subject,
+   description: newTicket.description,
+   location: newTicket.location,
+ });
+
  showToast(`Ticket #${newTicket.ticketNumber} has been opened successfully!`, 'success');
  setIsCreateModalOpen(false);
  setFormData({
