@@ -30,6 +30,7 @@ import {
 import { db } from "../../lib/firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { sanitizeForStorage } from "../../lib/storageUtils";
+import { getClientHeaders } from "../../lib/apiClient";
 import { getClientExpiryInfo, findPackageByDetails } from "../../lib/expiryUtils";
 import { ClientAiAssistant } from "../ClientAiAssistant";
 import {
@@ -473,7 +474,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     try {
       const res = await fetch("/api/ai/auto-fix-line", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getClientHeaders(),
         body: JSON.stringify({
           userId: activeClient.userId,
           phone: activeClient.phone,
@@ -520,14 +521,6 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         await setDoc(clientsRef, {
           value: sanitizeForStorage(nextClients),
           updatedAt: Date.now(),
-        });
-        fetch("/api/db/set", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            key: "nexora_clients",
-            value: sanitizeForStorage(nextClients),
-          }),
         }).catch(() => {});
 
         window.dispatchEvent(new Event("storage"));
@@ -539,52 +532,44 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     }
   };
 
-  // Save Client Profile / Password updates to DB & Firestore
+  // Save Client Profile / Password updates to server via dedicated client endpoint
   const handleSaveClientProfile = async (updates: Partial<Client>) => {
     const updatedClient: Client = { ...activeClient, ...updates };
     setActiveClient(updatedClient);
 
     try {
-      const res = await fetch("/api/db/get?key=nexora_clients");
-      const data = await res.json();
-      let allClients: Client[] = [];
-      if (data.success && Array.isArray(data.value)) {
-        allClients = data.value;
-      } else {
-        const local = localStorage.getItem("nexora_clients");
-        if (local) allClients = JSON.parse(local);
-      }
-
-      const nextClients = allClients.map((c) =>
-        c.id === updatedClient.id || c.userId === updatedClient.userId
-          ? updatedClient
-          : c
-      );
-
-      localStorage.setItem("nexora_clients", JSON.stringify(nextClients));
-      await fetch("/api/db/set", {
+      const res = await fetch("/api/client/update-profile", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getClientHeaders(),
         body: JSON.stringify({
-          key: "nexora_clients",
-          value: sanitizeForStorage(nextClients),
-          updatedAt: Date.now(),
+          userId: activeClient.userId,
+          phone: updates.phone,
+          password: updates.password,
+          address: updates.address,
+          notes: updates.notes,
         }),
       });
+      const data = await res.json();
+      if (data.success && data.client) {
+        setActiveClient((prev) => ({ ...prev, ...data.client }));
+      }
 
-      const clientsRef = doc(
-        db,
-        "ispWorkspace",
-        "mainData",
-        "collections",
-        "nexora_clients"
-      );
-      await setDoc(clientsRef, {
-        value: sanitizeForStorage(nextClients),
-        updatedAt: Date.now(),
-      }).catch(() => {});
+      const local = localStorage.getItem("nexora_clients");
+      if (local) {
+        try {
+          const allClients = JSON.parse(local);
+          const nextClients = allClients.map((c: any) =>
+            c.id === updatedClient.id || c.userId === updatedClient.userId
+              ? { ...c, ...updates }
+              : c
+          );
+          localStorage.setItem("nexora_clients", JSON.stringify(nextClients));
+        } catch {}
+      }
+
+      window.dispatchEvent(new Event("storage"));
     } catch (err) {
-      console.warn("Error saving client profile:", err);
+      console.error("Profile save error:", err);
     }
   };
 
@@ -739,56 +724,32 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           }
         } catch {}
 
-        if (savedRouter?.ip && savedRouter?.connected) {
-          const res = await fetch("/api/mikrotik/traffic", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              router: {
-                ip: savedRouter.ip,
-                apiPort: Number(savedRouter.port || savedRouter.apiPort) || 8728,
-                username: savedRouter.user || savedRouter.username || "admin",
-                password: savedRouter.password || "",
-                connected: true,
-                isDemo: savedRouter.isDemo,
-              },
-            }),
+        try {
+          const res = await fetch("/api/mikrotik/client-bandwidth", {
+            headers: getClientHeaders(),
           });
 
           if (res.ok && isMounted) {
             const data = await res.json();
-            if (data.success && Array.isArray(data.queues)) {
-              const q = data.queues.find(
-                (item: any) =>
-                  item.name === `nexora_${activeClient.userId}` ||
-                  item.name === activeClient.userId ||
-                  (activeClient.ipAddress &&
-                    item.target?.includes(activeClient.ipAddress))
-              );
-              if (q) {
-                const dl = parseFloat(
-                  (Number(q.rxMbps) || (Number(q.rxBps) || 0) / 1000000).toFixed(1)
-                );
-                const ul = parseFloat(
-                  (Number(q.txMbps) || (Number(q.txBps) || 0) / 1000000).toFixed(1)
-                );
-                const timeStr = new Date().toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit",
-                });
-                setBandwidthTelemetry((prev) => ({
-                  available: true,
-                  downloadMbps: dl,
-                  uploadMbps: ul,
-                  lastUpdated: timeStr,
-                  history: [...prev.history.slice(-19), { time: timeStr, dl, ul }],
-                }));
-                return;
-              }
+            if (data.success) {
+              const dl = Number(data.downloadMbps) || 0;
+              const ul = Number(data.uploadMbps) || 0;
+              const timeStr = new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              });
+              setBandwidthTelemetry((prev) => ({
+                available: true,
+                downloadMbps: dl,
+                uploadMbps: ul,
+                lastUpdated: timeStr,
+                history: [...prev.history.slice(-19), { time: timeStr, dl, ul }],
+              }));
+              return;
             }
           }
-        }
+        } catch {}
       } catch {}
 
       if (isMounted) {
@@ -913,13 +874,15 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         value: nextNotifs,
         updatedAt: Date.now(),
       }).catch(() => {});
-      fetch("/api/db/set", {
+
+      await fetch("/api/client/submit-ticket", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getClientHeaders(),
         body: JSON.stringify({
-          key: "nexora_notifications",
-          value: nextNotifs,
-          updatedAt: Date.now(),
+          category: newTicketCategory,
+          subject: newTicketSubject,
+          description: newTicketDesc,
+          priority: "High",
         }),
       }).catch(() => {});
 
@@ -1012,14 +975,17 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
         "nexora_renewal_requests",
         JSON.stringify(nextRequests)
       );
-      fetch("/api/db/set", {
+      // Submit renewal through secure authenticated server endpoint
+      await fetch("/api/client/submit-renewal", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getClientHeaders(),
         body: JSON.stringify({
-          key: "nexora_renewal_requests",
-          value: sanitizeForStorage(nextRequests),
+          packageName: selectedPackage,
+          paymentMethod: selectedPaymentMethod,
+          transactionId: finalTrx,
+          phone: checkoutPhone,
         }),
-      }).catch(() => {});
+      }).catch((err) => console.warn("Server renewal submission warning:", err));
 
       const paymentsRef = doc(
         db,
@@ -1057,16 +1023,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       await setDoc(paymentsRef, {
         value: sanitizeForStorage(nextPayments),
         updatedAt: Date.now(),
-      });
-      localStorage.setItem("nexora_payments", JSON.stringify(nextPayments));
-      fetch("/api/db/set", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          key: "nexora_payments",
-          value: sanitizeForStorage(nextPayments),
-        }),
       }).catch(() => {});
+      localStorage.setItem("nexora_payments", JSON.stringify(nextPayments));
       setBillingHistory(nextPayments.filter((p) => p.userId === client.userId));
 
       const notifRef = doc(
@@ -1092,14 +1050,6 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       await setDoc(notifRef, {
         value: sanitizeForStorage(nextNotifs),
         updatedAt: Date.now(),
-      });
-      fetch("/api/db/set", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          key: "nexora_notifications",
-          value: sanitizeForStorage(nextNotifs),
-        }),
       }).catch(() => {});
 
       window.dispatchEvent(new Event("storage"));

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Server, Search, CheckCircle, AlertTriangle, Info, RefreshCw, Save, History, PlayCircle, ShieldAlert } from 'lucide-react';
 import { DnsSecurityStatus, DnsProfileId, SecurityLogItem, ProposedChanges, RouterConfig } from '../../types';
+import { getAdminHeaders } from '../../lib/apiClient';
 
 interface MikrotikSecurityProps {
  showToast: (msg: string, type: 'info' | 'success' | 'error' | 'warning') => void;
@@ -23,7 +24,7 @@ export const MikrotikSecurityPage: React.FC<MikrotikSecurityProps> = ({
  setLoading(true);
  fetch('/api/mikrotik/status', {
  method: 'POST',
- headers: { 'Content-Type': 'application/json' },
+ headers: getAdminHeaders(),
  body: JSON.stringify({
  host: routerConfig.ip,
  port: routerConfig.apiPort,
@@ -116,7 +117,7 @@ export const MikrotikSecurityPage: React.FC<MikrotikSecurityProps> = ({
  
  fetch('/api/mikrotik/apply-dns', {
  method: 'POST',
- headers: { 'Content-Type': 'application/json' },
+ headers: getAdminHeaders(),
  body: JSON.stringify({
  params: {
  host: routerConfig.ip,

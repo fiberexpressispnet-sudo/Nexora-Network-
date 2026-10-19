@@ -27,6 +27,7 @@ import {
   Clock,
 } from "lucide-react";
 import { RouterConfig } from "../types";
+import { getAdminHeaders } from "../lib/apiClient";
 
 export type InterfaceId =
   "all" | "ether1-wan" | "ether2-lan" | "ether3-hotspot";
@@ -288,7 +289,7 @@ export const BandwidthMonitor: React.FC<BandwidthMonitorProps> = ({
       try {
         const res = await fetch("/api/mikrotik/traffic", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAdminHeaders(),
           body: JSON.stringify({
             router: {
               ip: routerConfig.ip,

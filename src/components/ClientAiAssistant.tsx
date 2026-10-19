@@ -19,6 +19,13 @@ import {
   Cpu,
 } from "lucide-react";
 import { Client } from "../types";
+import { getClientHeaders, getAdminHeaders } from "../lib/apiClient";
+
+function getAssistantHeaders(): Record<string, string> {
+  const clientHdrs = getClientHeaders();
+  if (clientHdrs["x-client-token"]) return clientHdrs;
+  return getAdminHeaders();
+}
 
 interface Message {
   id: string;
@@ -184,7 +191,7 @@ export const ClientAiAssistant: React.FC<ClientAiAssistantProps> = ({
     try {
       const res = await fetch("/api/ai/client-chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAssistantHeaders(),
         body: JSON.stringify({
           message: query,
           client: client,
@@ -275,7 +282,7 @@ export const ClientAiAssistant: React.FC<ClientAiAssistantProps> = ({
     try {
       const res = await fetch("/api/ai/auto-fix-line", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAssistantHeaders(),
         body: JSON.stringify({
           userId: targetId,
           phone: inputMessage,

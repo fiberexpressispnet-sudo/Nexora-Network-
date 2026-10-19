@@ -29,6 +29,7 @@ import {
  HardDrive
 } from 'lucide-react';
 import { RouterConfig } from '../types';
+import { getAdminHeaders } from '../lib/apiClient';
 
 export type InterfaceTabId = 'ether1-wan' | 'ether2-lan' | 'ether3-hotspot' | 'all';
 
@@ -270,7 +271,7 @@ export const LiveNetworkTraffic: React.FC<LiveNetworkTrafficProps> = ({
  try {
  const res = await fetch('/api/mikrotik/traffic', {
  method: 'POST',
- headers: { 'Content-Type': 'application/json' },
+ headers: getAdminHeaders(),
  body: JSON.stringify({
  router: {
  ip: routerConfig.ip,

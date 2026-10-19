@@ -27,6 +27,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
+import { getAdminHeaders } from '../../lib/apiClient';
 
 interface LiveBandwidthPageProps {
   clients: Client[];
@@ -121,7 +122,7 @@ export const LiveBandwidthPage: React.FC<LiveBandwidthPageProps> = ({
       try {
         const res = await fetch('/api/mikrotik/traffic', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAdminHeaders(),
           body: JSON.stringify({
             router: {
               ip: routerConfig.ip,
@@ -314,7 +315,7 @@ export const LiveBandwidthPage: React.FC<LiveBandwidthPageProps> = ({
     try {
       const res = await fetch('/api/mikrotik/kick-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           router: {
             ip: routerConfig.ip,

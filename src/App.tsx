@@ -858,7 +858,7 @@ export function MainApp({
       );
       fetch("/api/db/set", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           key: "isp_sms_logs",
           value: [smsLog, ...currentLogs],
@@ -1238,7 +1238,7 @@ export function MainApp({
 
       const res = await fetch("/api/mikrotik/test-connection", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           host: targetRouter.ip,
           port: targetRouter.apiPort || 8728,
@@ -1341,7 +1341,7 @@ export function MainApp({
       try {
         const res = await fetch("/api/mikrotik/active-users", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAdminHeaders(),
           body: JSON.stringify({ router: connectedRouter }),
         });
         const data = await res.json();
@@ -1435,7 +1435,7 @@ export function MainApp({
     try {
       const res = await fetch("/api/mikrotik/sync-client", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ router, client }),
         signal: controller.signal,
       });
@@ -1508,7 +1508,7 @@ export function MainApp({
     try {
       const res = await fetch("/api/mikrotik/toggle-client", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ router, userId, enabled, client }),
         signal: controller.signal,
       });
@@ -1614,7 +1614,7 @@ export function MainApp({
 
       fetch("/api/mikrotik/delete-client", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ router: targetRouter, userId: target.userId }),
       }).catch((err) => console.warn("MikroTik delete client warning:", err));
 

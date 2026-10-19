@@ -58,6 +58,7 @@ export interface Client {
   bandwidthProfileId?: number;
   email?: string;
   address?: string;
+  notes?: string;
   createdAt?: string;
   ip?: string;
   ipAddress?: string;
