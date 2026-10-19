@@ -48,14 +48,6 @@ export function decryptSecret(ciphertext: string): string {
   if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 16) {
     throw new Error("CRITICAL SECURITY ERROR: OLT_SECRET_KEY environment variable is missing or too short.");
   }
-  // Safe migration for legacy b64 if needed, or strict AES-GCM
-  if (ciphertext.startsWith("b64:")) {
-    try {
-      return Buffer.from(ciphertext.slice(4), "base64").toString("utf8");
-    } catch {
-      return "";
-    }
-  }
   try {
     const parts = ciphertext.split(":");
     const startIndex = parts[0] === "v1" ? 1 : 0;

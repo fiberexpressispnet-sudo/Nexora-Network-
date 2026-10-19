@@ -22,6 +22,8 @@ function assert(condition: boolean, testName: string, detail?: any) {
 
 console.log("\n=== Nexora Network Security & Integration Test Suite ===\n");
 
+process.env.OLT_SECRET_KEY = "test_key_32_bytes_len_!!!";
+
 // 1. OLT Encryption & Decryption Safety
 console.log("Suite 1: OLT Cryptographic Secret Encryption & Fallbacks");
 const secretText = "SuperSecretOltPassword123!";

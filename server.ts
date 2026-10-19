@@ -143,12 +143,23 @@ function logServerAudit(action: string, target: string, admin = "Server") {
 // =========================================================================
 // SECURITY & ROUTER VAULT SUBSYSTEM (SERVER-AUTHORITATIVE)
 // =========================================================================
-const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY || process.env.ADMIN_SECRET || "";
-const activeAdminTokens = new Set<string>(["nexora_isp_admin_token_2026_secured"]);
+const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY || "";
+const activeAdminTokens = new Map<string, number>(); // token -> expiresAt
 const activeClientSessions = new Map<string, { userId: string; phone: string; expiresAt: number }>();
 
 // In-Memory Server Router Vault (Never leaked to client browser)
 const routerVault: Record<string, any> = {};
+
+function isAdminToken(token: string): boolean {
+  if (ADMIN_SECRET && token === ADMIN_SECRET) return true;
+  const expiry = activeAdminTokens.get(token);
+  if (!expiry) return false;
+  if (Date.now() > expiry) {
+    activeAdminTokens.delete(token);
+    return false;
+  }
+  return true;
+}
 
 // Seed Router Vault from loaded DB routers or initial default credentials
 function initializeRouterVault() {
@@ -269,7 +280,7 @@ function requireAdminAuth(req: express.Request, res: express.Response, next: exp
     });
   }
 
-  if ((ADMIN_SECRET && token === ADMIN_SECRET) || activeAdminTokens.has(token)) {
+  if (isAdminToken(token)) {
     return next();
   }
 
@@ -294,7 +305,7 @@ function requireClientOrAdminAuth(req: express.Request, res: express.Response, n
     return res.status(401).json({ success: false, error: "Authentication token required" });
   }
 
-  if ((ADMIN_SECRET && token === ADMIN_SECRET) || activeAdminTokens.has(token)) {
+  if (isAdminToken(token)) {
     (req as any).userRole = "admin";
     return next();
   }
@@ -351,20 +362,15 @@ async function startServer() {
   // AUTHENTICATION ENDPOINTS
   // =========================================================================
   app.post("/api/auth/admin-login", rateLimiter(15, 60000), (req, res) => {
-    const { pin, password } = req.body;
-    const settingsRecord = localDb["nexora_settings"]?.value || {};
-    const configuredPin = settingsRecord.pinCode || settingsRecord.pinPassword || settingsRecord.recoveryPin || "";
-
-    const entered = String(pin || password || "").trim();
-    if (
-      (ADMIN_SECRET && entered === ADMIN_SECRET) ||
-      (configuredPin && entered === configuredPin)
-    ) {
+    const { password } = req.body;
+    const entered = String(password || "").trim();
+    
+    if (ADMIN_SECRET && entered === ADMIN_SECRET) {
       const sessionToken = `adm_tok_${crypto.randomBytes(24).toString("hex")}`;
-      activeAdminTokens.add(sessionToken);
+      activeAdminTokens.set(sessionToken, Date.now() + 3600000); // 1 hour
       return res.json({ success: true, token: sessionToken, role: "admin" });
     }
-    return res.status(401).json({ success: false, error: "Invalid PIN or Admin Password" });
+    return res.status(401).json({ success: false, error: "Invalid Admin Password" });
   });
 
   app.post("/api/auth/client-login", rateLimiter(20, 60000), (req, res) => {
@@ -413,7 +419,7 @@ async function startServer() {
     ) as string;
 
     if (!token) return res.json({ authenticated: false });
-    if ((ADMIN_SECRET && token === ADMIN_SECRET) || activeAdminTokens.has(token)) {
+    if (isAdminToken(token)) {
       return res.json({ authenticated: true, role: "admin" });
     }
     const clientSess = activeClientSessions.get(token);
@@ -457,11 +463,7 @@ async function startServer() {
       req.query.token
     ) as string | undefined;
 
-    const isAdmin = Boolean(
-      token &&
-      ((ADMIN_SECRET && token === ADMIN_SECRET) ||
-        activeAdminTokens.has(token))
-    );
+    const isAdmin = Boolean(token && isAdminToken(token));
 
     if (!isAdmin) {
       // Check if authenticated client requesting client data
@@ -4753,53 +4755,14 @@ ${clientContextText}
 
   // 9. Live QoE Telemetry & Bufferbloat HUD
   app.get("/api/libreqos/live-qoe", requireAdminAuth, (req, res) => {
-    try {
-      const nodes: LibreQosNode[] = localDb["libreqos_nodes"]?.value || defaultLibreQosNodes;
-      const wans: WanUplink[] = localDb["libreqos_wans"]?.value || defaultWanUplinks;
-      const clients = localDb["nexora_clients"]?.value || [];
-
-      // Calculate dynamic simulated telemetry for live graphs
-      const baseRtt = 7.4 + (Math.random() * 2.1 - 1.05);
-      const jitter = 0.4 + Math.random() * 0.3;
-      const totalDownRateMbps = wans.reduce((sum, w) => sum + (w.currentDownMbps || 800), 0) + (Math.random() * 40 - 20);
-      const totalUpRateMbps = wans.reduce((sum, w) => sum + (w.currentUpMbps || 250), 0) + (Math.random() * 15 - 7.5);
-      const activeCircuits = clients.filter((c: any) => c.status === "online").length || 142;
-
-      res.json({
-        success: true,
-        metrics: {
-          bufferbloatGrade: "A+",
-          qoeStarRating: 4.9,
-          avgRttMs: Math.round(baseRtt * 10) / 10,
-          jitterMs: Math.round(jitter * 10) / 10,
-          packetLossPercent: 0.001,
-          tcpRetransmitRate: 0.04,
-          totalThroughputDownMbps: Math.round(totalDownRateMbps * 10) / 10,
-          totalThroughputUpMbps: Math.round(totalUpRateMbps * 10) / 10,
-          totalCapacityDownMbps: wans.reduce((sum, w) => sum + (w.capacityDownMbps || 1000), 0),
-          totalCapacityUpMbps: wans.reduce((sum, w) => sum + (w.capacityUpMbps || 1000), 0),
-          activeCircuits,
-          shapedNodesCount: nodes.length,
-          cakeDropsPerSecond: Math.floor(Math.random() * 8),
-          cakeMarksPerSecond: Math.floor(Math.random() * 24 + 10),
-          timestamp: new Date().toISOString(),
-        },
-        nodes: nodes.map((n) => ({
-          ...n,
-          currentDownMbps: Math.round((n.currentDownMbps || 300) * (0.95 + Math.random() * 0.1) * 10) / 10,
-          currentUpMbps: Math.round((n.currentUpMbps || 100) * (0.95 + Math.random() * 0.1) * 10) / 10,
-          avgRttMs: Math.round(((n.avgRttMs || 8.0) + (Math.random() * 1.5 - 0.75)) * 10) / 10,
-        })),
-        uplinks: wans.map((w) => ({
-          ...w,
-          currentDownMbps: Math.round((w.currentDownMbps || 500) * (0.96 + Math.random() * 0.08) * 10) / 10,
-          currentUpMbps: Math.round((w.currentUpMbps || 150) * (0.96 + Math.random() * 0.08) * 10) / 10,
-          currentRttMs: Math.round(((w.currentRttMs || 5.0) + (Math.random() * 0.8 - 0.4)) * 10) / 10,
-        })),
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
-    }
+    res.json({
+      success: true,
+      status: "unavailable",
+      message: "Real-time telemetry is currently unavailable. Please ensure LibreQoS service is configured and connected.",
+      metrics: null,
+      nodes: [],
+      uplinks: [],
+    });
   });
 
   // 10. Execute MikroTik FastPath Offload
@@ -4839,6 +4802,18 @@ ${clientContextText}
         appliedSteps.push("Bridge FastPath enabled and IP firewall bypass set");
       } catch (e: any) {
         appliedSteps.push(`Bridge FastPath setup: ${e.message || "Simulated"}`);
+      }
+
+      const fastTrackFailed = appliedSteps.some(s => s.includes("FastTrack rule setup"));
+      const bridgeFailed = appliedSteps.some(s => s.includes("Bridge FastPath setup"));
+
+      if (fastTrackFailed || bridgeFailed) {
+        return res.status(502).json({
+          success: false,
+          message: "Partial failure applying MikroTik FastPath rules.",
+          appliedSteps,
+          router: targetParams.host,
+        });
       }
 
       res.json({
