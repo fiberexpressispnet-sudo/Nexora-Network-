@@ -190,11 +190,15 @@ export async function notifyNewPackageOrder(order: {
   paymentMethod?: string;
   transactionId?: string;
   connectionType?: string;
+  gateway?: string;
+  transaction?: string;
 }) {
   const settings = getWhatsappSettings();
   if (!settings.enabled || !settings.notifyNewOrder) return;
 
-  const text = `🛒 New Package Order (${order.orderNumber || "NEW"}): ${order.clientName} (${order.userId || order.phone}) • Package: ${order.packageName} (${order.connectionType || "PPPoE"}) • Amount: ৳${order.price} via ${order.paymentMethod || "Mobile Banking"} • TrxID: ${order.transactionId || "N/A"}`;
+  const method = order.paymentMethod || order.gateway || "Mobile Banking";
+  const trx = order.transactionId || order.transaction || "N/A";
+  const text = `🛒 New Package Order (${order.orderNumber || "NEW"}): ${order.clientName} (${order.userId || order.phone}) • Package: ${order.packageName} (${order.connectionType || "PPPoE"}) • Amount: ৳${order.price} via ${method} • TrxID: ${trx}`;
   appendInAppNotification(text, "⚡");
 }
 
@@ -224,6 +228,8 @@ export async function notifyPaymentDecision(decision: {
   paymentMethod?: string;
   transactionId?: string;
   expiry?: string;
+  newExpiry?: string;
+  reason?: string;
 }) {
   const settings = getWhatsappSettings();
   if (!settings.enabled) return;
@@ -231,9 +237,11 @@ export async function notifyPaymentDecision(decision: {
   if (decision.status === "rejected" && !settings.notifyPaymentRejected) return;
 
   const isApproved = decision.status === "approved";
+  const exp = decision.newExpiry || decision.expiry;
+  const reasonText = decision.reason ? ` Reason: ${decision.reason}` : "";
   const text = isApproved
-    ? `✅ Payment Approved & Line Active: ${decision.clientName} (${decision.userId}) • Package: ${decision.package || "Standard"} • Paid: ৳${decision.amount} (TrxID: ${decision.transactionId || "N/A"})${decision.expiry ? ` • New Expiry: ${decision.expiry}` : ""}`
-    : `❌ Payment Rejected: ${decision.clientName} (${decision.userId}) • Amount: ৳${decision.amount} (TrxID: ${decision.transactionId || "N/A"}) — Please verify Transaction ID.`;
+    ? `✅ Payment Approved & Line Active: ${decision.clientName} (${decision.userId}) • Package: ${decision.package || "Standard"} • Paid: ৳${decision.amount} (TrxID: ${decision.transactionId || "N/A"})${exp ? ` • New Expiry: ${exp}` : ""}`
+    : `❌ Payment Rejected: ${decision.clientName} (${decision.userId}) • Amount: ৳${decision.amount} (TrxID: ${decision.transactionId || "N/A"})${reasonText}`;
 
   appendInAppNotification(text, isApproved ? "CreditCard" : "AlertTriangle");
 }
@@ -244,6 +252,8 @@ export async function notifyClientStatusChange(data: {
   status: string;
   router?: string;
   reason?: string;
+  package?: string;
+  expiry?: string;
 }) {
   const settings = getWhatsappSettings();
   if (!settings.enabled || !settings.notifyClientStatus) return;
@@ -256,37 +266,43 @@ export async function notifyClientStatusChange(data: {
 }
 
 export async function notifyMikrotikAlert(alert: {
-  routerName: string;
+  routerName?: string;
+  name?: string;
   ip: string;
   status: "offline" | "online" | "high_load";
   cpu?: string | number;
   details?: string;
+  error?: string;
 }) {
   const settings = getWhatsappSettings();
   if (!settings.enabled || !settings.notifyMikrotikOffline) return;
 
+  const rName = alert.routerName || alert.name || "MikroTik Gateway";
   const icon =
     alert.status === "offline"
       ? "🚨"
       : alert.status === "high_load"
         ? "⚠️"
         : "⚡";
-  const text = `${icon} MikroTik Router Alert: ${alert.routerName} (${alert.ip}) is ${alert.status.toUpperCase()}${alert.cpu ? ` • CPU Load: ${alert.cpu}%` : ""}${alert.details ? ` — ${alert.details}` : ""}`;
+  const text = `${icon} MikroTik Router Alert: ${rName} (${alert.ip}) is ${alert.status.toUpperCase()}${alert.cpu ? ` • CPU Load: ${alert.cpu}%` : ""}${alert.details ? ` — ${alert.details}` : ""}`;
   appendInAppNotification(text, icon);
 }
 
 export async function notifyOltAlert(alert: {
-  oltName: string;
+  oltName?: string;
+  name?: string;
   ip: string;
   brand?: string;
   status: "offline" | "online" | "pon_down";
   details?: string;
+  error?: string;
 }) {
   const settings = getWhatsappSettings();
   if (!settings.enabled || !settings.notifyOltOffline) return;
 
+  const oName = alert.oltName || alert.name || "OLT Hardware";
   const icon = alert.status === "online" ? "⚡" : "🚨";
-  const text = `${icon} OLT Optical Hardware Alert: ${alert.oltName} (${alert.brand || "OLT"} - ${alert.ip}) is ${alert.status.toUpperCase()}${alert.details ? ` — ${alert.details}` : ""}`;
+  const text = `${icon} OLT Optical Hardware Alert: ${oName} (${alert.brand || "OLT"} - ${alert.ip}) is ${alert.status.toUpperCase()}${alert.details ? ` — ${alert.details}` : ""}`;
   appendInAppNotification(text, icon);
 }
 
@@ -294,15 +310,19 @@ export async function notifyOnuAlert(alert: {
   clientName?: string;
   userId?: string;
   serialNumber: string;
+  onuId?: string;
   oltName?: string;
   ponPort?: string;
   rxPower?: number | string;
-  status: "los" | "dying_gasp" | "low_rx" | "offline";
+  status?: "los" | "dying_gasp" | "low_rx" | "offline" | string;
+  alertType?: string;
+  distanceMeters?: number;
 }) {
   const settings = getWhatsappSettings();
   if (!settings.enabled || !settings.notifyOnuSignal) return;
 
-  const text = `⚠️ ONU Optical Signal Alert: ${alert.clientName || "Subscriber"} (${alert.userId || alert.serialNumber}) • ONU SN: ${alert.serialNumber} • Port: ${alert.oltName || "OLT"} PON ${alert.ponPort || "0/1"} • Signal: ${alert.status.toUpperCase()} (RX: ${alert.rxPower !== undefined ? `${alert.rxPower} dBm` : "LOS"})`;
+  const statusStr = alert.status || alert.alertType || "warning";
+  const text = `⚠️ ONU Optical Signal Alert: ${alert.clientName || "Subscriber"} (${alert.userId || alert.serialNumber}) • ONU SN: ${alert.serialNumber} • Port: ${alert.oltName || "OLT"} PON ${alert.ponPort || "0/1"} • Signal: ${statusStr.toUpperCase()} (RX: ${alert.rxPower !== undefined && alert.rxPower !== null ? `${alert.rxPower} dBm` : "LOS"})`;
   appendInAppNotification(text, "⚠️");
 }
 

@@ -48,6 +48,7 @@ interface ClientSubViewsProps {
   clientInvoices: Invoice[];
   billingHistory: PaymentRecord[];
   notifications: NotificationItem[];
+  tickets?: any[];
   onPrintReceipt: (payment: PaymentRecord) => void;
   onOpenPaymentModal: () => void;
   // Network & Ping props
@@ -84,6 +85,7 @@ export const ClientSubViews: React.FC<ClientSubViewsProps> = ({
   clientInvoices,
   billingHistory,
   notifications,
+  tickets,
   onPrintReceipt,
   onOpenPaymentModal,
   pingStatus,
@@ -765,6 +767,26 @@ export const ClientSubViews: React.FC<ClientSubViewsProps> = ({
 
   // 7 & 8. REAL-TIME NOTIFICATIONS VIEW (No External Bot Required)
   if (activeTab === "notifications" || activeTab === "telegram") {
+    const dlSpeed = client.speed || (bandwidthTelemetry?.downloadMbps ? `${bandwidthTelemetry.downloadMbps} Mbps` : "High-Speed Fiber");
+
+    let clientTickets: any[] = Array.isArray(tickets) ? tickets : [];
+    if (!clientTickets.length) {
+      try {
+        const raw = localStorage.getItem("isp_support_tickets");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            clientTickets = parsed.filter(
+              (t: any) =>
+                t.clientId === client.id ||
+                t.phone === client.phone ||
+                t.userId === client.userId
+            );
+          }
+        }
+      } catch {}
+    }
+
     const synthesizedAlerts: NotificationItem[] = [];
     if (isExpired) {
       synthesizedAlerts.push({
@@ -806,11 +828,11 @@ export const ClientSubViews: React.FC<ClientSubViewsProps> = ({
       });
     });
 
-    tickets.slice(0, 2).forEach((t, i) => {
+    clientTickets.slice(0, 2).forEach((t, i) => {
       synthesizedAlerts.push({
         id: 990200 + i,
         icon: "🎫",
-        text: `🎫 সাপোর্ট টিকেট (${t.ticketNumber}): "${t.subject}" — বর্তমান স্ট্যাটাস: ${t.status}`,
+        text: `🎫 সাপোর্ট টিকেট (${t.ticketNumber || t.id}): "${t.subject}" — বর্তমান স্ট্যাটাস: ${t.status}`,
         time: t.createdAt,
         read: t.status === "Resolved" || t.status === "Closed",
       });

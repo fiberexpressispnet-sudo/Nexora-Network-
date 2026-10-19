@@ -1649,6 +1649,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             clientInvoices={clientInvoices}
             billingHistory={billingHistory}
             notifications={clientNotifications}
+            tickets={tickets}
             onPrintReceipt={handlePrintReceipt}
             onOpenPaymentModal={handleInteractivePayment}
             pingStatus={pingStatus}
