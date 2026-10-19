@@ -358,9 +358,7 @@ async function startServer() {
     const entered = String(pin || password || "").trim();
     if (
       (ADMIN_SECRET && entered === ADMIN_SECRET) ||
-      (configuredPin && entered === configuredPin) ||
-      entered === "0000" ||
-      entered === "1234"
+      (configuredPin && entered === configuredPin)
     ) {
       const sessionToken = `adm_tok_${crypto.randomBytes(24).toString("hex")}`;
       activeAdminTokens.add(sessionToken);
@@ -436,10 +434,19 @@ async function startServer() {
       return res.status(400).json({ success: false, error: "Key query parameter is required" });
     }
 
-    // Public keys are accessible for package portal & login pages
+    // Public keys are accessible for package portal & login pages (with strict redaction for settings)
     if (PUBLIC_DB_KEYS.has(key)) {
       const record = localDb[key] || { value: null, updatedAt: 0 };
-      return res.json({ success: true, key, value: record.value, updatedAt: record.updatedAt });
+      let val = record.value;
+      if (key === "nexora_settings" && val && typeof val === "object") {
+        const safeSettings = { ...val };
+        delete safeSettings.pinCode;
+        delete safeSettings.pinPassword;
+        delete safeSettings.recoveryPin;
+        delete safeSettings.adminSecret;
+        val = safeSettings;
+      }
+      return res.json({ success: true, key, value: val, updatedAt: record.updatedAt });
     }
 
     // Sensitive keys require admin authentication (or client matching record)

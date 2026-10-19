@@ -27,42 +27,53 @@ export interface OLTServerConfig {
   notes?: string;
 }
 
-const ENCRYPTION_KEY = process.env.OLT_SECRET_KEY || 'feisp_olt_secure_master_key_32_bytes_len!!';
+const ENCRYPTION_KEY = process.env.OLT_SECRET_KEY || "";
 
 export function encryptSecret(plaintext: string): string {
-  if (!plaintext) return '';
-  try {
-    const iv = crypto.randomBytes(12);
-    const key = crypto.scryptSync(ENCRYPTION_KEY, 'olt_salt', 32);
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-    let encrypted = cipher.update(plaintext, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-    const authTag = cipher.getAuthTag().toString('hex');
-    return `${iv.toString('hex')}:${authTag}:${encrypted}`;
-  } catch (err) {
-    return `b64:${Buffer.from(plaintext).toString('base64')}`;
+  if (!plaintext) return "";
+  if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 16) {
+    throw new Error("CRITICAL SECURITY ERROR: OLT_SECRET_KEY environment variable is missing or too short.");
   }
+  const iv = crypto.randomBytes(12);
+  const key = crypto.scryptSync(ENCRYPTION_KEY, "olt_salt", 32);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  let encrypted = cipher.update(plaintext, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  const authTag = cipher.getAuthTag().toString("hex");
+  return `v1:${iv.toString("hex")}:${authTag}:${encrypted}`;
 }
 
 export function decryptSecret(ciphertext: string): string {
-  if (!ciphertext) return '';
-  if (ciphertext.startsWith('b64:')) {
-    return Buffer.from(ciphertext.slice(4), 'base64').toString('utf8');
+  if (!ciphertext) return "";
+  if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 16) {
+    throw new Error("CRITICAL SECURITY ERROR: OLT_SECRET_KEY environment variable is missing or too short.");
+  }
+  // Safe migration for legacy b64 if needed, or strict AES-GCM
+  if (ciphertext.startsWith("b64:")) {
+    try {
+      return Buffer.from(ciphertext.slice(4), "base64").toString("utf8");
+    } catch {
+      return "";
+    }
   }
   try {
-    const parts = ciphertext.split(':');
-    if (parts.length !== 3) return ciphertext;
-    const [ivHex, authTagHex, encryptedHex] = parts;
-    const iv = Buffer.from(ivHex, 'hex');
-    const authTag = Buffer.from(authTagHex, 'hex');
-    const key = crypto.scryptSync(ENCRYPTION_KEY, 'olt_salt', 32);
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    const parts = ciphertext.split(":");
+    const startIndex = parts[0] === "v1" ? 1 : 0;
+    if (parts.length - startIndex !== 3) return "";
+    const ivHex = parts[startIndex];
+    const authTagHex = parts[startIndex + 1];
+    const encryptedHex = parts[startIndex + 2];
+
+    const iv = Buffer.from(ivHex, "hex");
+    const authTag = Buffer.from(authTagHex, "hex");
+    const key = crypto.scryptSync(ENCRYPTION_KEY, "olt_salt", 32);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
     decipher.setAuthTag(authTag);
-    let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
+    let decrypted = decipher.update(encryptedHex, "hex", "utf8");
+    decrypted += decipher.final("utf8");
     return decrypted;
   } catch (err) {
-    return '';
+    return "";
   }
 }
 
